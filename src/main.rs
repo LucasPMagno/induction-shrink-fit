@@ -6,56 +6,55 @@ use defmt::*;
 use embassy_executor::Spawner;
 use cortex_m::singleton;
 use embassy_rp::{
-    gpio::{Drive, Level, Output}, pwm::{Config, Pwm, PwmOutput, SetDutyCycle}, Peripherals
+    gpio::{Drive, Input, Level, Output, Pull}, pwm::{Config, Pwm}, Peripherals
 };
 use embassy_rp::i2c::{I2c, Config as I2cConfig};
 
 
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 
 use {defmt_rtt as _, panic_probe as _};
 
-mod hardware;
+mod utils;
 mod ads7828;
 mod channel_buffers;
-mod tasks; // gather_channels_task, etc.
+mod tasks;
 
 use ads7828::Ads7828;
-use hardware::set_dead_time;
+use utils::set_dead_time;
 use channel_buffers::{ChannelBuffers, SafeChannelBuffers};
 use tasks::{gather_channels_task, log_channels};
 
-
-// #[embassy_executor::task]
-// async fn pwm_sweep_task(mut pwm_ch0: Pwm<'static>) {
-//     loop {
-//         // Ramp duty cycle from 0% to 100%
-//         for duty in 0..=100 {
-//             pwm_ch0.set_duty(duty).await;
-//             Timer::after(Duration::from_millis(10)).await;
-//         }
-//         // And back down from 100% to 0%
-//         for duty in (0..=100).rev() {
-//             pwm_ch0.set_duty(duty).await;
-//             Timer::after(Duration::from_millis(10)).await;
-//         }
-//     }
-// }
-
-
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    // Initialize the RP2040 driver, which gives us `Peripherals` with pre-split pins.
     let p: Peripherals = embassy_rp::init(Default::default());
 
+    // ------------------------------------------------------------------------------------------
+    // GPIO setups
+    // ------------------------------------------------------------------------------------------
     let mut io_interlock_loop = Output::new(p.PIN_15, Level::Low);
-
     let mut io_hs_enable = Output::new(p.PIN_5, Level::Low);
     let mut io_ls_enable = Output::new(p.PIN_9, Level::Low);
+    let input_gate_driver_fault = Input::new(p.PIN_6, Pull::Up);
+    let input_gate_driver_ready = Input::new(p.PIN_7, Pull::Up);
+    let input_dummy_pwm1a = Input::new(p.PIN_2, Pull::None);
+    let input_dummy_pwm1b = Input::new(p.PIN_3, Pull::None);
+    io_interlock_loop.set_high();
+    info!("Interlock loop overwritten on");
 
-    let mut c = Config::default();
+    io_ls_enable.set_high();
+    info!("LS enabled");
+
+    io_hs_enable.set_high();
+    info!("HS enabled");
+
+    info!("Gate driver fault: {}", input_gate_driver_fault.is_low()); //open drain pulled-up. Low is fault
+    info!("Gate driver ready: {}", input_gate_driver_ready.is_high()); //open drain pulled-up. High is ready (VDD and VCC are ok)
+
+    // ------------------------------------------------------------------------------------------
+    // PWM setup for SiC MOSFET
+    // ------------------------------------------------------------------------------------------
+    let mut c: Config = Config::default();
 
     let desired_freq_hz = 1_000;
     let clock_freq_hz = embassy_rp::clocks::clk_sys_freq();
@@ -65,52 +64,46 @@ async fn main(spawner: Spawner) {
     c.top = period;
     c.divider = divider.into();
     c.phase_correct = true;
-    c.invert_b = true; // Invert B output
+    c.invert_b = true;
+    c.enable = true;
 
-    let mut pwm_ch0: Pwm<'static> = Pwm::new_output_ab(
+    let pwm_ch0: Pwm<'static> = Pwm::new_output_ab(
         p.PWM_SLICE0,   // the underlying hardware PWM channel
         p.PIN_0,     // A output -> GPIO0
         p.PIN_1,     // B output -> GPIO1
         c.clone()
     );
 
-    // For I2C, pick your pins. For example, SDA=GPIO18, SCL=GPIO19
-    let mut i2c_cfg = I2cConfig::default();
-    i2c_cfg.frequency = 100_000; // or 1_000_000 if you need 1 MHz
+    // // ------------------------------------------------------------------------------------------
+    // // I2C ADC Setup
+    // // ------------------------------------------------------------------------------------------
+    // let mut i2c_cfg = I2cConfig::default();
+    // i2c_cfg.frequency = 100_000;
+    // let i2c1 = I2c::new_blocking(p.I2C1, p.PIN_19, p.PIN_18, i2c_cfg);
 
-    // Create the blocking I2C driver:
-    // `p.I2C0` = the I2C0 peripheral, `p.PIN_18` = SDA, `p.PIN_19` = SCL
-    let i2c1 = I2c::new_blocking(p.I2C1, p.PIN_19, p.PIN_18, i2c_cfg);
-    
-    let ads = singleton!(: Ads7828<'static> = {
-        Ads7828::new(i2c1, 0x48)
-    }).unwrap();
+    // // ------------------------------------------------------------------------------------------
+    // // Prepare and spawn tasks
+    // // ------------------------------------------------------------------------------------------
+    // let ads: &mut Ads7828<'_> = singleton!(: Ads7828<'static> = {
+    //     Ads7828::new(i2c1, 0x48)
+    // }).unwrap();
 
-    
-    let buffers = singleton!(: SafeChannelBuffers = {
-        SafeChannelBuffers::new(ChannelBuffers::new())
-    }).unwrap();
+    // let buffers = singleton!(: SafeChannelBuffers = {
+    //     SafeChannelBuffers::new(ChannelBuffers::new())
+    // }).unwrap();
 
-    // Now spawn the tasks, giving them &'static references
-    spawner.spawn(gather_channels_task(ads, buffers)).unwrap();
-    spawner.spawn(log_channels(buffers)).unwrap();
+    // spawner.spawn(gather_channels_task(ads, buffers)).unwrap();
+    // spawner.spawn(log_channels(buffers)).unwrap();
 
 
 
     info!("Hello World!");
 
-    set_dead_time(pwm_ch0, 512, 10000);
+    set_dead_time(pwm_ch0, 512, 1000);
 
-    io_interlock_loop.set_high();
-    info!("Interlock loop overwritten on");
 
-    io_ls_enable.set_high();
-    info!("LS enabled");
-
-    io_hs_enable.set_high();
-    info!("HS enabled");
-    // spawner.spawn(pwm_sweep_task(hw.pwm_ch0)).unwrap();
+    // sleep main forever
     loop {
-        embassy_time::Timer::after(Duration::from_secs(1)).await;
+        Timer::after(Duration::from_secs(1)).await;
     }
 }

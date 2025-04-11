@@ -1,11 +1,7 @@
-use defmt::info;
-use embassy_rp::pac::Interrupt::I2C1_IRQ;
-use embassy_time::Duration;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_rp::i2c::{I2c, Error as I2cError, Blocking};
 use embassy_rp::peripherals::I2C1; // or I2C1 if that’s your hardware
-use core::future::Future;
 
 
 // Map from your original code
@@ -81,8 +77,8 @@ impl<'d> Ads7828<'d> {
     /// Read all 8 channels (0..7).
     pub async fn get_channels(&self, _nostop: bool) -> Result<[u16; 8], I2cError> {
         let mut out = [0; 8];
-        for c in 0..8 {
-            out[c] = self.get_channel(c as u8, true).await?;
+        for (i, val) in out.iter_mut().enumerate() {
+            *val = self.get_channel(i as u8, true).await?;
         }
         Ok(out)
     }

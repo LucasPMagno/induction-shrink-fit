@@ -1,10 +1,10 @@
 use defmt::info;
 use embassy_rp::{
-    gpio::{Drive, Level, Output}, pwm::{Config, Pwm, PwmOutput, SetDutyCycle}, Peripherals
+    pwm::{Config, Pwm, SetDutyCycle}, clocks
 };
 
 pub fn set_dead_time(mut pwm_ch: Pwm<'static>, dt_ns: u32, desired_freq_hz: u32) {
-    let clock_freq_hz = embassy_rp::clocks::clk_sys_freq();
+    let clock_freq_hz = clocks::clk_sys_freq();
     let divider = 2u8;
     let period = ((clock_freq_hz / (desired_freq_hz * divider as u32))/2) as u16 - 1;
 
@@ -22,6 +22,7 @@ pub fn set_dead_time(mut pwm_ch: Pwm<'static>, dt_ns: u32, desired_freq_hz: u32)
     c.divider = divider.into();
     c.phase_correct = true;
     c.invert_b = true; // Invert B output
+    c.enable = true;
     pwm_ch.set_config(&c);
 
     let (pwm_ch0_a, pwm_ch0_b) = pwm_ch.split_by_ref();
