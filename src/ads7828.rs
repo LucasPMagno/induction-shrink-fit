@@ -1,3 +1,4 @@
+use defmt::info;
 use embassy_rp::pac::Interrupt::I2C1_IRQ;
 use embassy_time::Duration;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
