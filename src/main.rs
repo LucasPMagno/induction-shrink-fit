@@ -21,11 +21,13 @@ mod utils;
 mod ads7828;
 mod channel_buffers;
 mod tasks;
+mod lcd;
 
 use ads7828::Ads7828;
 use utils::*;
 use channel_buffers::{ChannelBuffers, SafeChannelBuffers};
 use tasks::*;
+use lcd::Lcd;
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -43,8 +45,8 @@ async fn main(spawner: Spawner) {
     let input_dummy_pwm1b = Input::new(p.PIN_3, Pull::None);
     let input_sic_rtd = Input::new(p.PIN_4, Pull::None);
 
-    io_interlock_loop.set_high();
-    info!("Interlock loop overwritten on");
+    // io_interlock_loop.set_high();
+    // info!("Interlock loop overwritten on");
 
     io_ls_enable.set_high();
     info!("LS enabled");
@@ -87,6 +89,49 @@ async fn main(spawner: Spawner) {
     let i2c1 = I2c::new_blocking(p.I2C1, p.PIN_19, p.PIN_18, i2c_cfg);
 
     // ------------------------------------------------------------------------------------------
+    // LCD Config
+    // ------------------------------------------------------------------------------------------
+    let rs_pin = Output::new(p.PIN_25, Level::Low);
+    let en_pin = Output::new(p.PIN_24, Level::Low);
+    let d4_pin = Output::new(p.PIN_23, Level::Low);
+    let d5_pin = Output::new(p.PIN_22, Level::Low);
+    let d6_pin = Output::new(p.PIN_21, Level::Low);
+    let d7_pin = Output::new(p.PIN_20, Level::Low);
+
+    let backlight_pin = None; // or None if unused
+
+    // Create an Lcd instance for a 16x2.
+    let mut lcd = Lcd::new(
+        rs_pin, 
+        en_pin, 
+        backlight_pin, 
+        d4_pin, 
+        d5_pin, 
+        d6_pin, 
+        d7_pin, 
+        16,  // columns
+        2,   // rows
+    );
+
+    // Initialize the display
+    lcd.init().await;
+    lcd.backlight(true);
+    lcd.set_cursor(0, 0).await;
+    lcd.message("Induction Shrink Fit Machine").await;
+    lcd.set_cursor(0, 1).await;
+    lcd.message("Initializing...").await;
+
+    // Blink the cursor to show it’s alive
+    lcd.show_blink(true).await;
+
+    // Move display a bit to show left/right shift
+    Timer::after(Duration::from_secs(2)).await;
+    lcd.move_right().await;
+    Timer::after(Duration::from_secs(2)).await;
+    lcd.move_left().await;
+
+
+    // ------------------------------------------------------------------------------------------
     // Prepare and spawn tasks
     // ------------------------------------------------------------------------------------------
     let ads: &mut Ads7828<'_> = singleton!(: Ads7828<'static> = {
@@ -104,10 +149,10 @@ async fn main(spawner: Spawner) {
     // PWM test
     // ------------------------------------------------------------------------------------------
 
-    Timer::after(Duration::from_secs(2)).await;
-    pwm_enable(&mut pwm_sic, 512, 50000);
-    Timer::after(Duration::from_secs(50)).await;
-    pwm_disable(&mut pwm_sic);
+    // Timer::after(Duration::from_secs(2)).await;
+    // pwm_enable(&mut pwm_sic, 512, 50000);
+    // Timer::after(Duration::from_secs(50)).await;
+    // pwm_disable(&mut pwm_sic);
 
     // sleep main forever
     loop {
