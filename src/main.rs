@@ -79,11 +79,6 @@ async fn main(spawner: Spawner) {
         c.clone()
     );
 
-
-
-
-
-
     // ------------------------------------------------------------------------------------------
     // I2C ADC Setup
     // ------------------------------------------------------------------------------------------
@@ -103,16 +98,15 @@ async fn main(spawner: Spawner) {
     }).unwrap();
 
     spawner.spawn(gather_channels_task(ads, buffers)).unwrap();
-    // spawner.spawn(log_channels(buffers)).unwrap();
-    spawner.spawn(measure_duty_cycle(input_sic_rtd)).unwrap();
+    spawner.spawn(log_channels(buffers)).unwrap();
 
     // ------------------------------------------------------------------------------------------
     // PWM test
     // ------------------------------------------------------------------------------------------
 
     Timer::after(Duration::from_secs(2)).await;
-    pwm_enable(&mut pwm_sic, 512, 28200);
-    Timer::after(Duration::from_secs(60)).await;
+    pwm_enable(&mut pwm_sic, 512, 50000);
+    Timer::after(Duration::from_secs(50)).await;
     pwm_disable(&mut pwm_sic);
 
     // sleep main forever
