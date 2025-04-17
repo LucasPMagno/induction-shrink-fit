@@ -49,3 +49,4 @@ pub async fn log_channels(buffers: &'static SafeChannelBuffers) {
         info!("Channel 7 = {}", guard.read_and_clear(7) as f32 / (65535.0) * 5.0);
     }
 }
+

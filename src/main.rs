@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-
 use defmt::*;
 use embassy_executor::Spawner;
 use cortex_m::singleton;
@@ -22,12 +21,16 @@ mod ads7828;
 mod channel_buffers;
 mod tasks;
 mod lcd;
+mod menu;
+mod mlx90614;
 
 use ads7828::Ads7828;
 use utils::*;
 use channel_buffers::{ChannelBuffers, SafeChannelBuffers};
 use tasks::*;
 use lcd::Lcd;
+use menu::menu_task;
+use mlx90614::Mlx90614;
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -36,7 +39,7 @@ async fn main(spawner: Spawner) {
     // ------------------------------------------------------------------------------------------
     // GPIO setups
     // ------------------------------------------------------------------------------------------
-    let mut io_interlock_loop = Output::new(p.PIN_15, Level::Low);
+    let mut io_interlock_loop = Input::new(p.PIN_15, Pull::Down);
     let mut io_hs_enable = Output::new(p.PIN_5, Level::Low);
     let mut io_ls_enable = Output::new(p.PIN_9, Level::Low);
     let input_gate_driver_fault = Input::new(p.PIN_6, Pull::Up);
@@ -132,6 +135,38 @@ async fn main(spawner: Spawner) {
 
 
     // ------------------------------------------------------------------------------------------
+    // Menu setup
+    // ------------------------------------------------------------------------------------------
+    let up_pin = Input::new(p.PIN_12, Pull::Up);
+    let down_pin = Input::new(p.PIN_13, Pull::Up);
+    let enter_pin = Input::new(p.PIN_14, Pull::Up);
+    let run_pin = Input::new(p.PIN_27, Pull::Up);
+
+    // Spawn the menu task
+    spawner
+        .spawn(menu_task(
+            lcd,
+            up_pin,
+            down_pin,
+            enter_pin,
+            run_pin,
+            io_interlock_loop,
+        ))
+        .unwrap();
+
+    // ------------------------------------------------------------------------------------------
+    // MLX90614 setup
+    // ------------------------------------------------------------------------------------------
+    let mut i2c_cfg = I2cConfig::default();
+    i2c_cfg.frequency = 100000;
+    let i2c = I2c::new_blocking(p.I2C0, p.PIN_17, p.PIN_16, i2c_cfg);
+    
+    let mut mlx = Mlx90614::new(i2c);
+
+    // one‑time emissivity programming (comment out after first run!)
+    // mlx.program_emissivity_082().await.unwrap();
+    
+    // ------------------------------------------------------------------------------------------
     // Prepare and spawn tasks
     // ------------------------------------------------------------------------------------------
     let ads: &mut Ads7828<'_> = singleton!(: Ads7828<'static> = {
@@ -143,7 +178,7 @@ async fn main(spawner: Spawner) {
     }).unwrap();
 
     spawner.spawn(gather_channels_task(ads, buffers)).unwrap();
-    spawner.spawn(log_channels(buffers)).unwrap();
+    // spawner.spawn(log_channels(buffers)).unwrap();
 
     // ------------------------------------------------------------------------------------------
     // PWM test
@@ -157,5 +192,11 @@ async fn main(spawner: Spawner) {
     // sleep main forever
     loop {
         Timer::after(Duration::from_secs(1)).await;
+
+        match mlx.read_object_temp().await {
+            Ok(t) => defmt::info!("Object T = {} °C", t),
+            Err(e) => defmt::warn!("I²C error: {:?}", e),
+        }
+        Timer::after(Duration::from_millis(500)).await;
     }
 }
