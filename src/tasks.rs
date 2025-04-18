@@ -6,6 +6,7 @@ use crate::channel_buffers::SafeChannelBuffers;
 use embassy_rp::gpio::{AnyPin, Input};
 use embassy_rp::pio::program::pio_asm;
 use embassy_rp::pio::StateMachine;
+use libm::log;
 
 
 
@@ -34,7 +35,7 @@ pub async fn gather_channels_task(
 #[embassy_executor::task]
 pub async fn log_channels(buffers: &'static SafeChannelBuffers) {
     loop {
-        Timer::after(Duration::from_millis(100)).await;
+        Timer::after(Duration::from_millis(1000)).await;
         info!("Running use_channels_task");
         let mut guard = buffers.lock().await;
 
@@ -45,7 +46,8 @@ pub async fn log_channels(buffers: &'static SafeChannelBuffers) {
         info!("Channel 3 = {}", guard.read_and_clear(3) as f32 / (65535.0) * 5.0);
         info!("Channel 4 = {}", guard.read_and_clear(4) as f32 / (65535.0) * 5.0);
         info!("Channel 5 = {}", guard.read_and_clear(5) as f32 / (65535.0) * 5.0);
-        info!("Channel 6 = {}", guard.read_and_clear(6) as f32 / (65535.0) * 5.0);
+        let coil_temp_v: f32 = guard.read_and_clear(6) as f32 / (65535.0) * 5.0;
+        info!("C6 Coil Temp = {}", -25.84 * log(((coil_temp_v * 10000.0) / (5.0 - coil_temp_v)) as f64) as f32 + 264.18);
         info!("Channel 7 = {}", guard.read_and_clear(7) as f32 / (65535.0) * 5.0);
     }
 }

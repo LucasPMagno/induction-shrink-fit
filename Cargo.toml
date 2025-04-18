@@ -19,7 +19,7 @@ embassy-macros = "0.2.1"
 cyw43 = { version = "0.3.0", features = ["defmt", "firmware-logs"] }
 cyw43-pio = { version = "0.4.0", features = ["defmt"] }
 critical-section = "1.2.0"
-
+libm = { version = "0.2", default-features = false }   
 
 defmt = "0.3"
 defmt-rtt = "0.4"

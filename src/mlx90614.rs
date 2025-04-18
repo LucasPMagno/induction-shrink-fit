@@ -29,9 +29,7 @@ impl<'d, T: i2c::Instance, M: i2c::Mode> Mlx90614<'d, T, M> {
     /// Read object temperature 1 and return it in °C
     pub async fn read_object_temp(&mut self) -> Result<f32, i2c::Error> {
         let raw: u16 = self.read_word(REG_TOBJ1).await?;
-        info!("raw object temperature: {}", raw);
         // data sheet: Temp[°C] = (RAW * 0.02) – 273.15
-        // info!("flags {}", self.read_word(0xf0).await?);
         Ok(raw as f32 * 0.02 - 273.15)
     }
 

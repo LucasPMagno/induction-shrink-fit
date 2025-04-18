@@ -1068,6 +1068,7 @@ dependencies = [
  "fixed-macro",
  "futures",
  "heapless 0.8.0",
+ "libm",
  "log",
  "panic-probe",
  "pio 0.2.1",
@@ -1183,6 +1184,12 @@ name = "libc"
 version = "0.2.171"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c19937216e9d3aa9956d9bb8dfc0b0c8beb6058fc4f7a4dc4d850edf86a237d6"
+
+[[package]]
+name = "libm"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8355be11b20d696c8f18f6cc018c4e372165b1fa8126cef092399c9951984ffa"
 
 [[package]]
 name = "libredox"

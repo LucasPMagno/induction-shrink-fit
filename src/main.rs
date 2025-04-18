@@ -127,13 +127,6 @@ async fn main(spawner: Spawner) {
     // Blink the cursor to show it’s alive
     lcd.show_blink(true).await;
 
-    // Move display a bit to show left/right shift
-    Timer::after(Duration::from_secs(2)).await;
-    lcd.move_right().await;
-    Timer::after(Duration::from_secs(2)).await;
-    lcd.move_left().await;
-
-
     // ------------------------------------------------------------------------------------------
     // Menu setup
     // ------------------------------------------------------------------------------------------
@@ -162,9 +155,6 @@ async fn main(spawner: Spawner) {
     let i2c = I2c::new_blocking(p.I2C0, p.PIN_17, p.PIN_16, i2c_cfg);
     
     let mut mlx = Mlx90614::new(i2c);
-
-    // one‑time emissivity programming (comment out after first run!)
-    // mlx.program_emissivity_082().await.unwrap();
     
     // ------------------------------------------------------------------------------------------
     // Prepare and spawn tasks
@@ -178,7 +168,7 @@ async fn main(spawner: Spawner) {
     }).unwrap();
 
     spawner.spawn(gather_channels_task(ads, buffers)).unwrap();
-    // spawner.spawn(log_channels(buffers)).unwrap();
+    spawner.spawn(log_channels(buffers)).unwrap();
 
     // ------------------------------------------------------------------------------------------
     // PWM test
