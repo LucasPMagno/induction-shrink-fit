@@ -7,12 +7,12 @@ use embassy_time::{Duration, Timer};
 pub const MLX90614_ADDR: u8 = 0x5A;
 
 /// RAM / EEPROM locations we care about
-const REG_TOBJ1: u8          = 0x07;  // object temperature 1, read‑only RAM
-const EEPROM_EMISSIVITY: u8  = 0x04;  // EEPROM emissivity
-const EEPROM_UNLOCK: u8      = 0x0F;  // xCx devices only
+const REG_TOBJ1: u8 = 0x07; // object temperature 1, read‑only RAM
+const EEPROM_EMISSIVITY: u8 = 0x04; // EEPROM emissivity
+const EEPROM_UNLOCK: u8 = 0x0F; // xCx devices only
 
 /// Value for ε = 0.82 → round(0.82 × 65535) = 0xD1EB
-const EMISSIVITY_WORD: u16   = 0xD1EB;
+const EMISSIVITY_WORD: u16 = 0xD1EB;
 
 /// MLX90614 object – owns the I²C peripheral
 pub struct Mlx90614<'d, T: i2c::Instance, M: i2c::Mode> {
@@ -60,9 +60,10 @@ impl<'d, T: i2c::Instance, M: i2c::Mode> Mlx90614<'d, T, M> {
     async fn read_word(&mut self, cmd: u8) -> Result<u16, i2c::Error> {
         // write command byte, then repeated‑START + read 2 bytes
         let mut buf = [0u8; 3];
-        self.i2c.blocking_write_read(MLX90614_ADDR, &[cmd], &mut buf)?;
+        self.i2c
+            .blocking_write_read(MLX90614_ADDR, &[cmd], &mut buf)?;
         Ok(u16::from_le_bytes([buf[0], buf[1]]))
-        }
+    }
 
     async fn write_word(&mut self, cmd: u8, data: u16) -> Result<(), i2c::Error> {
         let mut pkt = [0u8; 3];

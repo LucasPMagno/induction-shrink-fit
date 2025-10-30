@@ -10,34 +10,34 @@ use {defmt_rtt as _, panic_probe as _}; // Example panicking/logging; adjust to 
 ///////////////////////////////////////////////////////////////////////////////
 
 // Mode flags
-const LCD_CHR: u8 = 1;  // Character mode
-const LCD_CMD: u8 = 0;  // Command mode
+const LCD_CHR: u8 = 1; // Character mode
+const LCD_CMD: u8 = 0; // Command mode
 
 // Command flags
-const LCD_CLEAR: u8           = 0x01;
-const LCD_CURSORSHIFT: u8     = 0x10;
-const LCD_DISPLAYCONTROL: u8  = 0x08;
-const LCD_HOME: u8            = 0x02;
-const LCD_SETDDRAMADDR: u8    = 0x80;
-const LCD_SETCGRAMADDR: u8    = 0x40;
+const LCD_CLEAR: u8 = 0x01;
+const LCD_CURSORSHIFT: u8 = 0x10;
+const LCD_DISPLAYCONTROL: u8 = 0x08;
+const LCD_HOME: u8 = 0x02;
+const LCD_SETDDRAMADDR: u8 = 0x80;
+const LCD_SETCGRAMADDR: u8 = 0x40;
 
 // Control flags
-const LCD_DISPLAYON: u8  = 0x04;
+const LCD_DISPLAYON: u8 = 0x04;
 const LCD_DISPLAYOFF: u8 = 0x00;
-const LCD_CURSORON: u8   = 0x02;
-const LCD_CURSOROFF: u8  = 0x00;
-const LCD_BLINKON: u8    = 0x01;
-const LCD_BLINKOFF: u8   = 0x00;
+const LCD_CURSORON: u8 = 0x02;
+const LCD_CURSOROFF: u8 = 0x00;
+const LCD_BLINKON: u8 = 0x01;
+const LCD_BLINKOFF: u8 = 0x00;
 
 // Move flags
 const LCD_DISPLAYMOVE: u8 = 0x08;
-const LCD_MOVELEFT: u8    = 0x00;
-const LCD_MOVERIGHT: u8   = 0x04;
+const LCD_MOVELEFT: u8 = 0x00;
+const LCD_MOVERIGHT: u8 = 0x04;
 
 // Timing constants
 // Adjust as needed for your particular LCD or microsecond constraints.
-const E_PULSE_US: u32 = 500;  // 500us
-const E_DELAY_US: u32 = 500;  // 500us
+const E_PULSE_US: u32 = 500; // 500us
+const E_DELAY_US: u32 = 500; // 500us
 const HOMEDELAY_MS: u64 = 50; // 50ms
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -151,7 +151,8 @@ impl<'a> Lcd<'a> {
             _ => 0x00,
         };
 
-        self.write_byte(LCD_SETDDRAMADDR | (x + row_offset), LCD_CMD).await;
+        self.write_byte(LCD_SETDDRAMADDR | (x + row_offset), LCD_CMD)
+            .await;
     }
 
     /// Enables or disables the backlight (if present).
@@ -168,7 +169,8 @@ impl<'a> Lcd<'a> {
         } else {
             self.display_control &= !LCD_DISPLAYON;
         }
-        self.write_byte(LCD_DISPLAYCONTROL | self.display_control, LCD_CMD).await;
+        self.write_byte(LCD_DISPLAYCONTROL | self.display_control, LCD_CMD)
+            .await;
     }
 
     /// Enable or disable underline cursor.
@@ -178,7 +180,8 @@ impl<'a> Lcd<'a> {
         } else {
             self.display_control &= !LCD_CURSORON;
         }
-        self.write_byte(LCD_DISPLAYCONTROL | self.display_control, LCD_CMD).await;
+        self.write_byte(LCD_DISPLAYCONTROL | self.display_control, LCD_CMD)
+            .await;
     }
 
     /// Enable or disable blinking cursor.
@@ -188,7 +191,8 @@ impl<'a> Lcd<'a> {
         } else {
             self.display_control &= !LCD_BLINKON;
         }
-        self.write_byte(LCD_DISPLAYCONTROL | self.display_control, LCD_CMD).await;
+        self.write_byte(LCD_DISPLAYCONTROL | self.display_control, LCD_CMD)
+            .await;
     }
 
     /// Create a custom character (stored in CGRAM) at `location` (0-7).
@@ -197,7 +201,8 @@ impl<'a> Lcd<'a> {
         if location > 7 {
             return; // Only 8 custom chars allowed
         }
-        self.write_byte(LCD_SETCGRAMADDR | (location << 3), LCD_CMD).await;
+        self.write_byte(LCD_SETCGRAMADDR | (location << 3), LCD_CMD)
+            .await;
         for row in pattern {
             self.write_byte(*row, LCD_CHR).await;
         }

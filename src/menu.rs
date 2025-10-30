@@ -1,459 +1,440 @@
-use defmt::Str;
-use embassy_rp::gpio::{Input, Level, Output, Pull};
-use embassy_rp::pac::pwm;
-use embassy_time::{Duration, Instant, Timer};
-use embassy_rp::i2c::{self, I2c, Instance};
-use embassy_rp::pwm::{Pwm};
-
-use heapless::{String, Vec};
-use core::sync::atomic::{AtomicU16, Ordering};
 use core::fmt::Write;
 
-use {defmt_rtt as _, panic_probe as _};
+use embassy_rp::gpio::Input;
+use embassy_time::{Duration, Timer};
+use heapless::String;
 
-use crate::lcd as lcd_driver;
-use crate::tasks::LAST_TEMP;
-use crate::utils::*;
-// ---------------------------------------------------------------------
-// Menu states
-// ---------------------------------------------------------------------
-#[derive(Debug, Clone, Copy)]
-enum MenuState {
-    Welcome,
-    ManualHold,
-    // ManualFreqTime,
-    // ManualPowerTime,
-    // PresetSelect,
-    // Running,
-    // Cooldown,
-}
+use crate::{
+    lcd::Lcd,
+    safety::{clear_fault, current_fault},
+    state::{
+        ControlMode, FaultCode, CONTROL_SETTINGS, CONTROL_STATUS, MEASUREMENTS, POWER_LIMIT_KW,
+    },
+};
 
-struct MenuSelections {
-    time_ms: u32,       // e.g., in increments of 100ms
-    freq_khz: u32,      // e.g., in kHz
-    power_w: u32,       // e.g., in 100W increments
-    tool_diameter_inch: f32,
-}
+const MANUAL_STEP_KW: f32 = 0.5;
+const TEMP_STEP_C: f32 = 5.0;
+const TEMP_MIN_C: f32 = 40.0;
+const TEMP_MAX_C: f32 = 350.0;
+const STATUS_REFRESH_MS: u64 = 250;
 
 #[embassy_executor::task]
 pub async fn menu_task(
-    mut lcd: lcd_driver::Lcd<'static>,
-    up: Input<'static>,
-    down: Input<'static>,
-    enter: Input<'static>,
-    run_pin: Input<'static>,
-    estop: Input<'static>,
-    mut run_pwm: Pwm<'static>,
-){
-    // Initialize the LCD display in some manner
+    mut lcd: Lcd<'static>,
+    mut up: Input<'static>,
+    mut down: Input<'static>,
+    mut enter: Input<'static>,
+) {
     lcd.backlight(true);
     lcd.clear().await;
     lcd.home().await;
 
-    // Our current state
-    let mut state = MenuState::Welcome;
+    let mut screen = Screen::ModeSelect;
+    let mut selected_mode = ControlMode::ManualPower;
 
-    // The user’s chosen parameters
-    let mut selections = MenuSelections {
-        time_ms: 1000,       // default 1 second
-        freq_khz: 50,        // default 50 kHz
-        power_w: 1000,       // default 1kW
-        tool_diameter_inch: 0.5,
-    };
-
-    // Main loop
     loop {
-        match state {
-            MenuState::Welcome => {
-                display_welcome(&mut lcd).await;
-                wait_for_button_press(&enter).await;
-                state = MenuState::ManualHold;
+        if let FaultCode::None = current_fault().await {
+        } else {
+            screen = fault_screen(&mut lcd, &mut enter).await;
+            continue;
+        }
+
+        screen = match screen {
+            Screen::ModeSelect => {
+                set_mode(ControlMode::Idle).await;
+                mode_select_screen(&mut lcd, &mut up, &mut down, &mut enter, selected_mode).await
             }
-
-            MenuState::ManualHold => {
-                manual_hold_menu(&mut lcd, &run_pin, &mut run_pwm).await;
+            Screen::ManualConfig => {
+                selected_mode = ControlMode::ManualPower;
+                set_mode(ControlMode::ManualPower).await;
+                manual_config_screen(&mut lcd, &mut up, &mut down, &mut enter).await
             }
+            Screen::ManualStatus => {
+                selected_mode = ControlMode::ManualPower;
+                set_mode(ControlMode::ManualPower).await;
+                manual_status_screen(&mut lcd, &mut up, &mut down, &mut enter).await
+            }
+            Screen::TemperatureConfig => {
+                selected_mode = ControlMode::Temperature;
+                set_mode(ControlMode::Temperature).await;
+                temperature_config_screen(&mut lcd, &mut up, &mut down, &mut enter).await
+            }
+            Screen::TemperatureStatus => {
+                selected_mode = ControlMode::Temperature;
+                set_mode(ControlMode::Temperature).await;
+                temperature_status_screen(&mut lcd, &mut up, &mut down, &mut enter).await
+            }
+            Screen::Cooldown => {
+                set_mode(ControlMode::Cooldown).await;
+                cooldown_screen(&mut lcd, &mut up, &mut down, &mut enter).await
+            }
+        };
+    }
+}
 
-            // MenuState::ManualFreqTime => {
-            //     manual_freq_time_menu(&mut lcd, &up, &down, &enter, &mut selections).await;
-            //     // Next step
-            //     state = MenuState::ManualPowerTime;
-            // }
+#[derive(Clone, Copy)]
+enum Screen {
+    ModeSelect,
+    ManualConfig,
+    ManualStatus,
+    TemperatureConfig,
+    TemperatureStatus,
+    Cooldown,
+}
 
-            // MenuState::ManualPowerTime => {
-            //     manual_power_time_menu(&mut lcd, &up, &down, &enter, &mut selections).await;
-            //     // Next step
-            //     state = MenuState::PresetSelect;
-            // }
+async fn mode_select_screen(
+    lcd: &mut Lcd<'static>,
+    up: &mut Input<'static>,
+    down: &mut Input<'static>,
+    enter: &mut Input<'static>,
+    current_mode: ControlMode,
+) -> Screen {
+    let mut index = if current_mode == ControlMode::Temperature {
+        1
+    } else {
+        0
+    };
+    loop {
+        lcd.clear().await;
+        display_line(
+            lcd,
+            0,
+            if index == 0 {
+                "> Manual Power"
+            } else {
+                "  Manual Power"
+            },
+        )
+        .await;
+        display_line(
+            lcd,
+            1,
+            if index == 1 {
+                "> Temperature "
+            } else {
+                "  Temperature "
+            },
+        )
+        .await;
 
-            // MenuState::PresetSelect => {
-            //     preset_select_menu(&mut lcd, &up, &down, &enter, &mut selections).await;
-            //     // Next step
-            //     state = MenuState::Running;
-            // }
-
-            // MenuState::Running => {
-            //     // If E-stop is active, skip running
-            //     if estop.is_low() {
-            //         // Show E-stop message
-            //         lcd.clear().await;
-            //         lcd.set_cursor(0, 0).await;
-            //         lcd.message("E-STOP ACTIVE!").await;
-            //         Timer::after(Duration::from_secs(2)).await;
-            //     } else {
-            //         run_coil_sequence(&mut lcd, &run_pin, &selections).await;
-            //     }
-            //     // Next step
-            //     state = MenuState::Cooldown;
-            // }
-
-            // MenuState::Cooldown => {
-            //     cooldown_sequence(&mut lcd).await;
-            //     // Once cooldown is done, go back to welcome or end?
-            //     state = MenuState::Welcome;
-            // }
+        match wait_for_any_button(up, down, enter).await {
+            ButtonPressed::Up => {
+                index = (index + 1) % 2;
+            }
+            ButtonPressed::Down => {
+                index = (index + 1) % 2;
+            }
+            ButtonPressed::Enter => {
+                return if index == 0 {
+                    Screen::ManualConfig
+                } else {
+                    Screen::TemperatureConfig
+                };
+            }
+            _ => {}
         }
     }
 }
 
-// ---------------------------------------------------------------------
-// Sample submenus
-// ---------------------------------------------------------------------
-async fn display_welcome(lcd: &mut lcd_driver::Lcd<'static>) {
+async fn manual_config_screen(
+    lcd: &mut Lcd<'static>,
+    up: &mut Input<'static>,
+    down: &mut Input<'static>,
+    enter: &mut Input<'static>,
+) -> Screen {
     lcd.clear().await;
-    lcd.set_cursor(0, 0).await;
-    lcd.message("Shrink Fit v1.0").await;
-    lcd.set_cursor(0, 1).await;
-    lcd.message("Press Enter...").await;
-}
+    display_line(lcd, 0, "Manual power set").await;
 
-async fn manual_hold_menu (
-    lcd: &mut lcd_driver::Lcd<'_>,
-    run_pin: &Input<'_>,
-    run_pwm: & mut Pwm<'static>,
-) {
-    let mut time_passed : i32 = 0;
     loop {
-        
-        Timer::after(Duration::from_millis(100)).await;
-        if run_pin.is_low() {
-            pwm_enable(run_pwm, 512, 29700);
-            time_passed = time_passed + 100;
+        let value = {
+            let settings = CONTROL_SETTINGS.lock().await;
+            settings.manual_power_kw
+        };
+
+        let mut line = String::<16>::new();
+        write!(&mut line, "Target: {:>4.1}kW", value).ok();
+        display_line(lcd, 1, line.as_str()).await;
+
+        match wait_for_any_button(up, down, enter).await {
+            ButtonPressed::Up => {
+                let next = (value + MANUAL_STEP_KW).clamp(0.0, POWER_LIMIT_KW);
+                set_manual_power(next).await;
+            }
+            ButtonPressed::Down => {
+                let next = (value - MANUAL_STEP_KW).clamp(0.0, POWER_LIMIT_KW);
+                set_manual_power(next).await;
+            }
+            ButtonPressed::Enter => {
+                return Screen::ManualStatus;
+            }
+            _ => {}
         }
-        if run_pin.is_high() {
-            pwm_disable( run_pwm);
-        }
-        lcd.init().await;
-        lcd.set_cursor(0, 0).await;
-        let mut msg: String<16> = String::new();
-        write!(msg, "Time on: {}ms", time_passed);
-        lcd.message(&msg).await;
-        lcd.set_cursor(0, 1).await;
-        let mut msg2: String<16> = String::new();
-        write!(msg2, "temp: {:?}", LAST_TEMP.lock().await.get());
-        lcd.message(&msg2).await;
-    }  
+    }
 }
 
-// async fn manual_freq_time_menu(
-//     lcd: &mut lcd_driver::Lcd<'_>,
-//     up: &Input<'_>,
-//     down: &Input<'_>,
-//     enter: &Input<'_>,
-//     selections: &mut MenuSelections,
-// ) {
-//     // Adjust time (increments of 100ms) and freq (kHz)
-//     loop {
-//         // Show current settings
-//         lcd.clear().await;
-//         lcd.set_cursor(0, 0).await;
-//         let mut msg: String<16> = String::new();
-//         write!(msg, "Time: {}ms", selections.time_ms);
-//         lcd.message(&msg).await;
+async fn manual_status_screen(
+    lcd: &mut Lcd<'static>,
+    up: &mut Input<'static>,
+    down: &mut Input<'static>,
+    enter: &mut Input<'static>,
+) -> Screen {
+    lcd.clear().await;
+    loop {
+        let status = CONTROL_STATUS.lock().await.clone();
+        let meas = MEASUREMENTS.lock().await.clone();
+        let v_display = meas.dc_voltage_v.clamp(0.0, 999.0);
+        let i_display = meas.coil_current_rms_a.clamp(0.0, 999.0);
 
-//         lcd.set_cursor(0, 1).await;
-//         let mut msg2: String<16> = String::new();
-//         write!(&mut msg2, "Freq: {}kHz", selections.freq_khz);
-//         lcd.message(&msg2).await;
+        let mut line1 = String::<16>::new();
+        write!(
+            &mut line1,
+            "P {:>4.1}k T {:>4.1}k",
+            meas.coil_power_kw, status.power_setpoint_kw
+        )
+        .ok();
+        display_line(lcd, 0, line1.as_str()).await;
 
-//         // Wait for a button press
-//         match wait_for_any_button(up, down, enter).await {
-//             ButtonPressed::Up => {
-//                 // example: increment freq
-//                 selections.freq_khz += 1;
-//             }
-//             ButtonPressed::Down => {
-//                 // example: decrement freq (not below 1kHz)
-//                 if selections.freq_khz > 1 {
-//                     selections.freq_khz -= 1;
-//                 }
-//             }
-//             ButtonPressed::Enter => {
-//                 // Move to adjusting time
-//                 adjust_time(lcd, selections, up, down, enter).await;
-//                 // After adjusting time, exit the loop
-//                 break;
-//             }
-//             _ => {}
-//         }
-//     }
-// }
+        let mut line2 = String::<16>::new();
+        write!(
+            &mut line2,
+            "{} V{:>3.0} I{:>3.0}",
+            if status.run_active { "R:ON" } else { "R:OFF" },
+            v_display,
+            i_display
+        )
+        .ok();
+        display_line(lcd, 1, line2.as_str()).await;
 
-// async fn manual_power_time_menu(
-//     lcd: &mut lcd_driver::Lcd<'_>,
-//     up: &Input<'_>,
-//     down: &Input<'_>,
-//     enter: &Input<'_>,
-//     selections: &mut MenuSelections,
-// ) {
-//     // Adjust time (increments of 100ms) and power (in 100W increments)
-//     loop {
-//         lcd.clear().await;
-//         lcd.set_cursor(0, 0).await;
-//         let mut msg: String<16> = String::new();
-//         write!(msg, "Time: {}ms", selections.time_ms);
-//         lcd.message(&msg).await;
+        if enter.is_low() {
+            wait_for_button_release(enter).await;
+            return Screen::ModeSelect;
+        }
+        if up.is_low() {
+            wait_for_button_release(up).await;
+            return Screen::ManualConfig;
+        }
+        if down.is_low() {
+            wait_for_button_release(down).await;
+            return Screen::ModeSelect;
+        }
 
-//         lcd.set_cursor(0, 1).await;
-//         let mut msg2: String<16> = String::new();
-//         write!(msg2, "Power: {}W", selections.power_w);
-//         lcd.message(&msg2).await;
+        Timer::after(Duration::from_millis(STATUS_REFRESH_MS)).await;
+    }
+}
 
-//         match wait_for_any_button(up, down, enter).await {
-//             ButtonPressed::Up => {
-//                 // increment power
-//                 selections.power_w += 100;
-//             }
-//             ButtonPressed::Down => {
-//                 // decrement power (not below 100W)
-//                 if selections.power_w >= 100 {
-//                     selections.power_w -= 100;
-//                 }
-//             }
-//             ButtonPressed::Enter => {
-//                 // Move to adjusting time
-//                 adjust_time(lcd, selections, up, down, enter).await;
-//                 break;
-//             }
-//             _ => {}
-//         }
-//     }
-// }
+async fn temperature_config_screen(
+    lcd: &mut Lcd<'static>,
+    up: &mut Input<'static>,
+    down: &mut Input<'static>,
+    enter: &mut Input<'static>,
+) -> Screen {
+    lcd.clear().await;
+    display_line(lcd, 0, "Target temperature").await;
 
-// // Submenu for selecting a tool preset
-// async fn preset_select_menu(
-//     lcd: &mut lcd_driver::Lcd<'_>,
-//     up: &Input<'_>,
-//     down: &Input<'_>,
-//     enter: &Input<'_>,
-//     selections: &mut MenuSelections,
-// ) {
-//     // Just 2 presets: 0.5in or 0.75in
-//     let mut idx = 0; // 0 => 0.5in, 1 => 0.75in
+    loop {
+        let value = {
+            let settings = CONTROL_SETTINGS.lock().await;
+            settings.target_temp_c
+        };
 
-//     loop {
-//         lcd.clear().await;
-//         lcd.set_cursor(0, 0).await;
-//         lcd.message("Select Tool").await;
+        let mut line = String::<16>::new();
+        write!(&mut line, "Target: {:>4.0}C", value).ok();
+        display_line(lcd, 1, line.as_str()).await;
 
-//         lcd.set_cursor(0, 1).await;
-//         if idx == 0 {
-//             lcd.message("0.5in").await;
-//         } else {
-//             lcd.message("0.75in").await;
-//         }
+        match wait_for_any_button(up, down, enter).await {
+            ButtonPressed::Up => {
+                let next = (value + TEMP_STEP_C).clamp(TEMP_MIN_C, TEMP_MAX_C);
+                set_temperature_target(next).await;
+            }
+            ButtonPressed::Down => {
+                let next = (value - TEMP_STEP_C).clamp(TEMP_MIN_C, TEMP_MAX_C);
+                set_temperature_target(next).await;
+            }
+            ButtonPressed::Enter => {
+                return Screen::TemperatureStatus;
+            }
+            _ => {}
+        }
+    }
+}
 
-//         match wait_for_any_button(up, down, enter).await {
-//             ButtonPressed::Up => {
-//                 idx = 0;
-//             }
-//             ButtonPressed::Down => {
-//                 idx = 1;
-//             }
-//             ButtonPressed::Enter => {
-//                 selections.tool_diameter_inch = if idx == 0 { 0.5 } else { 0.75 };
-//                 break;
-//             }
-//             _ => {}
-//         }
-//     }
-// }
+async fn temperature_status_screen(
+    lcd: &mut Lcd<'static>,
+    up: &mut Input<'static>,
+    down: &mut Input<'static>,
+    enter: &mut Input<'static>,
+) -> Screen {
+    lcd.clear().await;
+    loop {
+        let status = CONTROL_STATUS.lock().await.clone();
+        let meas = MEASUREMENTS.lock().await.clone();
+        let target_temp = CONTROL_SETTINGS.lock().await.target_temp_c;
 
-// // ---------------------------------------------------------------------
-// // Running coil subroutine
-// // ---------------------------------------------------------------------
-// async fn run_coil_sequence(lcd: &mut lcd_driver::Lcd<'_>, run_pin: &Input<'_>, sel: &MenuSelections) {
-//     // Wait for user to press RUN
-//     lcd.clear().await;
-//     lcd.set_cursor(0, 0).await;
-//     lcd.message("Press RUN...").await;
-//     lcd.set_cursor(0, 1).await;
-//     lcd.message("to start coil").await;
+        let mut line1 = String::<16>::new();
+        write!(
+            &mut line1,
+            "Obj {:>4.0}C T {:>4.0}C",
+            meas.object_temp_c, target_temp
+        )
+        .ok();
+        display_line(lcd, 0, line1.as_str()).await;
 
-//     wait_for_button_press(run_pin).await;
+        if status.target_reached {
+            display_line(lcd, 1, "Press Enter Cool").await;
+        } else {
+            let mut line2 = String::<16>::new();
+            write!(
+                &mut line2,
+                "Coil{:>3.0}C Mod{:>3.0}",
+                meas.coil_temp_c, meas.module_temp_c
+            )
+            .ok();
+            display_line(lcd, 1, line2.as_str()).await;
+        }
 
-//     // Show "Running" screen
-//     lcd.clear().await;
-//     lcd.set_cursor(0, 0).await;
-//     lcd.message("Coil Active!").await;
+        if enter.is_low() {
+            wait_for_button_release(enter).await;
 
-//     // Example usage: user might pick either frequency-based or power-based run
-//     // or we run both in some logic. For demonstration:
-//     // run_coil_freq(sel.time_ms, sel.freq_khz);
-//     // or: run_coil_power(sel.time_ms, sel.power_w);
-//     // or: run_coil_preset(sel.tool_diameter_inch);
+            if status.target_reached {
+                return Screen::Cooldown;
+            } else {
+                return Screen::TemperatureConfig;
+            }
+        }
+        if up.is_low() {
+            wait_for_button_release(up).await;
+            return Screen::TemperatureConfig;
+        }
+        if down.is_low() {
+            wait_for_button_release(down).await;
+            return Screen::ModeSelect;
+        }
 
-//     // While coil runs, we show the time left
-//     // We'll do a simple countdown from `time_ms`. In a real design,
-//     // your coil run might be non-blocking. For demonstration, we just do a naive approach:
-//     let start = Instant::now();
-//     let total = Duration::from_millis(sel.time_ms as u64);
+        Timer::after(Duration::from_millis(STATUS_REFRESH_MS)).await;
+    }
+}
 
-//     loop {
-//         let elapsed = Instant::now() - start;
-//         if elapsed >= total {
-//             break;
-//         }
-//         let remain = total - elapsed;
-//         let remain_ms = remain.as_millis() as u32;
+async fn cooldown_screen(
+    lcd: &mut Lcd<'static>,
+    up: &mut Input<'static>,
+    down: &mut Input<'static>,
+    enter: &mut Input<'static>,
+) -> Screen {
+    lcd.clear().await;
+    display_line(lcd, 0, "Cooling active").await;
+    display_line(lcd, 1, "Enter to exit").await;
 
-//         lcd.set_cursor(0, 1).await;
-//         let mut msg: String<16> = String::new();
-//         write!(msg, "Time left: {}ms", remain_ms);
-//         lcd.message(&msg).await;
+    loop {
+        if enter.is_low() || up.is_low() || down.is_low() {
+            wait_for_button_release(enter).await;
+            wait_for_button_release(up).await;
+            wait_for_button_release(down).await;
+            set_mode(ControlMode::Idle).await;
+            return Screen::ModeSelect;
+        }
 
-//         Timer::after(Duration::from_millis(100)).await;
-//     }
+        Timer::after(Duration::from_millis(STATUS_REFRESH_MS)).await;
+    }
+}
 
-//     // Once done, coil is off. Show "Done!"
-//     lcd.clear().await;
-//     lcd.set_cursor(0, 0).await;
-//     lcd.message("Coil run done.").await;
-//     Timer::after(Duration::from_secs(2)).await;
-// }
+async fn fault_screen(lcd: &mut Lcd<'static>, enter: &mut Input<'static>) -> Screen {
+    loop {
+        let code = current_fault().await;
+        if code == FaultCode::None {
+            return Screen::ModeSelect;
+        }
 
-// // ---------------------------------------------------------------------
-// // Cooldown state
-// // ---------------------------------------------------------------------
-// async fn cooldown_sequence(lcd: &mut lcd_driver::Lcd<'_>) {
-//     // Wait until temperature is below some threshold
-//     lcd.clear().await;
-//     lcd.set_cursor(0, 0).await;
-//     lcd.message("Cooling down...").await;
+        lcd.clear().await;
+        display_line(lcd, 0, "FAULT DETECTED").await;
+        display_line(lcd, 1, code.message()).await;
 
-//     loop {
-//         // let temp = TEMPERATURE_C.load(Ordering::Relaxed);
-//         let temp = 25;
-//         lcd.set_cursor(0, 1).await;
-//         let mut msg: String<16> = String::new();
-//         write!(msg, "Temp: {}C", temp);
-//         lcd.message(&msg).await;
+        if enter.is_low() {
+            wait_for_button_release(enter).await;
+            clear_fault().await;
+            Timer::after(Duration::from_millis(100)).await;
+            if current_fault().await == FaultCode::None {
+                lcd.clear().await;
+                display_line(lcd, 0, "Fault cleared").await;
+                Timer::after(Duration::from_millis(500)).await;
+                return Screen::ModeSelect;
+            }
+        }
 
-//         if temp <= 40 {
-//             // Suppose "safe to touch" = 40°C
-//             break;
-//         }
-//         Timer::after(Duration::from_millis(500)).await;
-//     }
+        Timer::after(Duration::from_millis(200)).await;
+    }
+}
 
-//     lcd.clear().await;
-//     lcd.set_cursor(0, 0).await;
-//     lcd.message("Safe to remove").await;
-//     Timer::after(Duration::from_secs(2)).await;
-// }
+async fn set_manual_power(value: f32) {
+    let mut settings = CONTROL_SETTINGS.lock().await;
+    settings.manual_power_kw = value;
+}
 
-// // ---------------------------------------------------------------------
-// // Helpers
-// // ---------------------------------------------------------------------
+async fn set_temperature_target(value: f32) {
+    let mut settings = CONTROL_SETTINGS.lock().await;
+    settings.target_temp_c = value;
+}
 
-// // Example: adjust time in 100ms increments
-// async fn adjust_time(
-//     lcd: &mut lcd_driver::Lcd<'_>,
-//     selections: &mut MenuSelections,
-//     up: &Input<'_>,
-//     down: &Input<'_>,
-//     enter: &Input<'_>,
-// ) {
-//     loop {
-//         lcd.clear().await;
-//         lcd.set_cursor(0, 0).await;
-//         lcd.message("Adjust Time").await;
+async fn set_mode(mode: ControlMode) {
+    let mut settings = CONTROL_SETTINGS.lock().await;
+    settings.mode = mode;
+}
 
-//         lcd.set_cursor(0, 1).await;
-//         let mut msg: String<16> = String::new();
-//         write!(msg, "{}ms (+/-)", selections.time_ms);
-//         lcd.message(&msg).await;
+async fn display_line(lcd: &mut Lcd<'static>, row: u8, text: &str) {
+    let formatted = fit_to_line(text);
+    lcd.set_cursor(0, row).await;
+    lcd.message(formatted.as_str()).await;
+}
 
-//         match wait_for_any_button(up, down, enter).await {
-//             ButtonPressed::Up => {
-//                 selections.time_ms += 100;
-//             }
-//             ButtonPressed::Down => {
-//                 if selections.time_ms >= 100 {
-//                     selections.time_ms -= 100;
-//                 }
-//             }
-//             ButtonPressed::Enter => {
-//                 break;
-//             }
-//             _ => {}
-//         }
-//     }
-// }
+fn fit_to_line(text: &str) -> String<16> {
+    let mut buf = String::<16>::new();
+    for ch in text.chars().take(16) {
+        buf.push(ch).ok();
+    }
+    while buf.len() < 16 {
+        buf.push(' ').ok();
+    }
+    buf
+}
 
-// ---------------------------------------------------------------------
-// Reading button presses
-// ---------------------------------------------------------------------
+async fn wait_for_button_release(button: &mut Input<'static>) {
+    while button.is_low() {
+        Timer::after(Duration::from_millis(20)).await;
+    }
+}
+
 #[derive(Debug)]
 enum ButtonPressed {
     Up,
     Down,
     Enter,
-    Run,
     None,
 }
 
-/// Blocks until one of the 3 menu buttons is pressed.
 async fn wait_for_any_button(
-    up: &Input<'_>,
-    down: &Input<'_>,
-    enter: &Input<'_>,
+    up: &mut Input<'static>,
+    down: &mut Input<'static>,
+    enter: &mut Input<'static>,
 ) -> ButtonPressed {
     loop {
         if up.is_low() {
-            // naive debouncing
             Timer::after(Duration::from_millis(20)).await;
             if up.is_low() {
+                wait_for_button_release(up).await;
                 return ButtonPressed::Up;
             }
         }
         if down.is_low() {
             Timer::after(Duration::from_millis(20)).await;
             if down.is_low() {
+                wait_for_button_release(down).await;
                 return ButtonPressed::Down;
             }
         }
         if enter.is_low() {
             Timer::after(Duration::from_millis(20)).await;
             if enter.is_low() {
+                wait_for_button_release(enter).await;
                 return ButtonPressed::Enter;
-            }
-        }
-        Timer::after(Duration::from_millis(10)).await;
-    }
-}
-
-/// Blocks until a specific button is pressed.
-async fn wait_for_button_press(pin: &Input<'_>) {
-    loop {
-        if pin.is_low() {
-            Timer::after(Duration::from_millis(20)).await;
-            if pin.is_low() {
-                // wait until release
-                while pin.is_low() {
-                    Timer::after(Duration::from_millis(10)).await;
-                }
-                break;
             }
         }
         Timer::after(Duration::from_millis(10)).await;

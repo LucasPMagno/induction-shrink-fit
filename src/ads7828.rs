@@ -1,19 +1,11 @@
+use embassy_rp::i2c::{Blocking, Error as I2cError, I2c};
+use embassy_rp::peripherals::I2C1;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
-use embassy_rp::i2c::{I2c, Error as I2cError, Blocking};
-use embassy_rp::peripherals::I2C1; // or I2C1 if that’s your hardware
-
+use embassy_sync::mutex::Mutex; // or I2C1 if that’s your hardware
 
 // Map from your original code
 const ADS7828_CHANNEL_MAP: [u8; 8] = [
-    0b00000000,
-    0b01000000,
-    0b00010000,
-    0b01010000,
-    0b00100000,
-    0b01100000,
-    0b00110000,
-    0b01110000,
+    0b00000000, 0b01000000, 0b00010000, 0b01010000, 0b00100000, 0b01100000, 0b00110000, 0b01110000,
 ];
 
 /// ADS7828 driver on a shared I2C bus (blocking mode).
@@ -37,7 +29,7 @@ impl<'d> Ads7828<'d> {
         }
     }
 
-    /// Generate the command byte. 
+    /// Generate the command byte.
     fn generate_command_byte(channel: u8, ref_on: bool, converter_on: bool) -> u8 {
         let mut byte = 0b1000_0000; // single ended mode
         if channel > 7 {
@@ -55,7 +47,7 @@ impl<'d> Ads7828<'d> {
     }
 
     /// Get a single 12-bit reading from `channel` (0..7).
-    /// 
+    ///
     /// `nostop` typically implies a repeated-start. In Embassy’s blocking
     /// I2C, `write_then_read` does a repeated start, not a “no stop” cycle.
     pub async fn get_channel(&self, channel: u8, _nostop: bool) -> Result<u16, I2cError> {
