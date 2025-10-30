@@ -6,6 +6,12 @@ use crate::channel_buffers::SafeChannelBuffers;
 use embassy_rp::gpio::{AnyPin, Input};
 use embassy_rp::pio::program::pio_asm;
 use embassy_rp::pio::StateMachine;
+use core::cell::Cell;
+use embassy_rp::i2c::{I2c, Instance};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+
+use crate::mlx90614::Mlx90614;
+
 use libm::log;
 
 
@@ -52,3 +58,21 @@ pub async fn log_channels(buffers: &'static SafeChannelBuffers) {
     }
 }
 
+
+
+/// Shared last‑sample value (°C).  Other tasks `lock().await` to read.
+pub static LAST_TEMP: Mutex<CriticalSectionRawMutex, Cell<f32>> =
+    Mutex::new(Cell::new(0.0));
+
+#[embassy_executor::task]
+pub async fn mlx_task(
+    mut mlx: Mlx90614<'static, embassy_rp::peripherals::I2C0, embassy_rp::i2c::Blocking>
+) {
+    loop {
+        if let Ok(t) = mlx.read_object_temp().await {
+            LAST_TEMP.lock().await.set(t);
+        }
+        info!("Object T = {} °C", LAST_TEMP.lock().await.get());
+        Timer::after(Duration::from_millis(100)).await; // 100 ms period
+    }
+}

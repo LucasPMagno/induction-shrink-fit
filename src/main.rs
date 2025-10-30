@@ -5,7 +5,7 @@ use defmt::*;
 use embassy_executor::Spawner;
 use cortex_m::singleton;
 use embassy_rp::{
-    gpio::{AnyPin, Input, Level, Output, Pull},
+    gpio::{Drive, AnyPin, Input, Level, Output, Pull},
     pwm::{Config, Pwm, SetDutyCycle},
     Peripherals,
 };
@@ -94,12 +94,18 @@ async fn main(spawner: Spawner) {
     // ------------------------------------------------------------------------------------------
     // LCD Config
     // ------------------------------------------------------------------------------------------
-    let rs_pin = Output::new(p.PIN_25, Level::Low);
-    let en_pin = Output::new(p.PIN_24, Level::Low);
-    let d4_pin = Output::new(p.PIN_23, Level::Low);
-    let d5_pin = Output::new(p.PIN_22, Level::Low);
-    let d6_pin = Output::new(p.PIN_21, Level::Low);
-    let d7_pin = Output::new(p.PIN_20, Level::Low);
+    let mut rs_pin: Output<'_> = Output::new(p.PIN_25, Level::Low);
+    rs_pin.set_drive_strength(Drive::_12mA);
+    let mut  en_pin = Output::new(p.PIN_24, Level::Low);
+    en_pin.set_drive_strength(Drive::_12mA);
+    let mut d4_pin = Output::new(p.PIN_23, Level::Low);
+    d4_pin.set_drive_strength(Drive::_12mA);
+    let mut d5_pin = Output::new(p.PIN_22, Level::Low);
+    d5_pin.set_drive_strength(Drive::_12mA);
+    let mut d6_pin = Output::new(p.PIN_21, Level::Low);
+    d6_pin.set_drive_strength(Drive::_12mA);
+    let mut d7_pin = Output::new(p.PIN_20, Level::Low);
+    d7_pin.set_drive_strength(Drive::_12mA);
 
     let backlight_pin = None; // or None if unused
 
@@ -130,10 +136,10 @@ async fn main(spawner: Spawner) {
     // ------------------------------------------------------------------------------------------
     // Menu setup
     // ------------------------------------------------------------------------------------------
-    let up_pin = Input::new(p.PIN_12, Pull::Up);
-    let down_pin = Input::new(p.PIN_13, Pull::Up);
-    let enter_pin = Input::new(p.PIN_14, Pull::Up);
-    let run_pin = Input::new(p.PIN_27, Pull::Up);
+    let down_pin = Input::new(p.PIN_12, Pull::Up);
+    let up_pin = Input::new(p.PIN_13, Pull::Up);
+    let run_pin = Input::new(p.PIN_14, Pull::Up);
+    let enter_pin = Input::new(p.PIN_27, Pull::Up);
 
     // Spawn the menu task
     spawner
@@ -144,6 +150,7 @@ async fn main(spawner: Spawner) {
             enter_pin,
             run_pin,
             io_interlock_loop,
+            pwm_sic,
         ))
         .unwrap();
 
@@ -154,7 +161,8 @@ async fn main(spawner: Spawner) {
     i2c_cfg.frequency = 100000;
     let i2c = I2c::new_blocking(p.I2C0, p.PIN_17, p.PIN_16, i2c_cfg);
     
-    let mut mlx = Mlx90614::new(i2c);
+    let mut mlx: Mlx90614<'_, embassy_rp::peripherals::I2C0, embassy_rp::i2c::Blocking> = Mlx90614::new(i2c);
+    spawner.spawn(tasks::mlx_task(mlx)).unwrap();
     
     // ------------------------------------------------------------------------------------------
     // Prepare and spawn tasks
@@ -183,10 +191,10 @@ async fn main(spawner: Spawner) {
     loop {
         Timer::after(Duration::from_secs(1)).await;
 
-        match mlx.read_object_temp().await {
-            Ok(t) => defmt::info!("Object T = {} °C", t),
-            Err(e) => defmt::warn!("I²C error: {:?}", e),
-        }
-        Timer::after(Duration::from_millis(500)).await;
+        // match mlx.read_object_temp().await {
+        //     Ok(t) => defmt::info!("Object T = {} °C", t),
+        //     Err(e) => defmt::warn!("I²C error: {:?}", e),
+        // }
+        // Timer::after(Duration::from_millis(500)).await;
     }
 }
