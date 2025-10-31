@@ -19,7 +19,7 @@ pub async fn safety_task(
         let code = evaluate_fault(interlock, gate_fault, gate_ready).await;
         if code != FaultCode::None {
             let mut fault = FAULT_STATE.lock().await;
-            if fault.code == FaultCode::None {
+            if fault.code != code {
                 warn!("Fault detected: {}", code.message());
                 fault.code = code;
             }

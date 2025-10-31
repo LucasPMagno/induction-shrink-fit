@@ -1,4 +1,5 @@
-use defmt::warn;
+use defmt::*;
+use embassy_futures::yield_now;
 use embassy_rp::adc::{Adc, Async, Channel};
 use embassy_rp::gpio::Input;
 use embassy_time::{Duration, Instant, Timer};
@@ -68,12 +69,19 @@ pub async fn adc_task(
                 guard.coil_power_kw = smooth_value(guard.coil_power_kw, power_kw);
                 guard.valid = true;
             }
-
+            info!(
+                "Vdc: {} V, Icoil: {} A, Pcoil: {} kW",
+                vrms,
+                irms,
+                power_kw
+            );
             acc_v_sq = 0.0;
             acc_i_sq = 0.0;
             acc_vi = 0.0;
             pairs_accumulated = 0;
         }
+
+        yield_now().await;
     }
 }
 

@@ -1,5 +1,7 @@
 use core::fmt::Write;
+use core::pin::pin;
 
+use embassy_futures::select::{select3, Either3};
 use embassy_rp::gpio::Input;
 use embassy_time::{Duration, Timer};
 use heapless::String;
@@ -117,7 +119,7 @@ async fn mode_select_screen(
         )
         .await;
 
-        match wait_for_any_button(up, down, enter).await {
+        match wait_for_press(up, down, enter).await {
             ButtonPressed::Up => {
                 index = (index + 1) % 2;
             }
@@ -131,7 +133,6 @@ async fn mode_select_screen(
                     Screen::TemperatureConfig
                 };
             }
-            _ => {}
         }
     }
 }
@@ -155,7 +156,7 @@ async fn manual_config_screen(
         write!(&mut line, "Target: {:>4.1}kW", value).ok();
         display_line(lcd, 1, line.as_str()).await;
 
-        match wait_for_any_button(up, down, enter).await {
+        match wait_for_press(up, down, enter).await {
             ButtonPressed::Up => {
                 let next = (value + MANUAL_STEP_KW).clamp(0.0, POWER_LIMIT_KW);
                 set_manual_power(next).await;
@@ -167,7 +168,6 @@ async fn manual_config_screen(
             ButtonPressed::Enter => {
                 return Screen::ManualStatus;
             }
-            _ => {}
         }
     }
 }
@@ -206,15 +206,15 @@ async fn manual_status_screen(
         display_line(lcd, 1, line2.as_str()).await;
 
         if enter.is_low() {
-            wait_for_button_release(enter).await;
+            wait_for_release(enter).await;
             return Screen::ModeSelect;
         }
         if up.is_low() {
-            wait_for_button_release(up).await;
+            wait_for_release(up).await;
             return Screen::ManualConfig;
         }
         if down.is_low() {
-            wait_for_button_release(down).await;
+            wait_for_release(down).await;
             return Screen::ModeSelect;
         }
 
@@ -241,7 +241,7 @@ async fn temperature_config_screen(
         write!(&mut line, "Target: {:>4.0}C", value).ok();
         display_line(lcd, 1, line.as_str()).await;
 
-        match wait_for_any_button(up, down, enter).await {
+        match wait_for_press(up, down, enter).await {
             ButtonPressed::Up => {
                 let next = (value + TEMP_STEP_C).clamp(TEMP_MIN_C, TEMP_MAX_C);
                 set_temperature_target(next).await;
@@ -253,7 +253,6 @@ async fn temperature_config_screen(
             ButtonPressed::Enter => {
                 return Screen::TemperatureStatus;
             }
-            _ => {}
         }
     }
 }
@@ -293,7 +292,7 @@ async fn temperature_status_screen(
         }
 
         if enter.is_low() {
-            wait_for_button_release(enter).await;
+            wait_for_release(enter).await;
 
             if status.target_reached {
                 return Screen::Cooldown;
@@ -302,11 +301,11 @@ async fn temperature_status_screen(
             }
         }
         if up.is_low() {
-            wait_for_button_release(up).await;
+            wait_for_release(up).await;
             return Screen::TemperatureConfig;
         }
         if down.is_low() {
-            wait_for_button_release(down).await;
+            wait_for_release(down).await;
             return Screen::ModeSelect;
         }
 
@@ -326,9 +325,9 @@ async fn cooldown_screen(
 
     loop {
         if enter.is_low() || up.is_low() || down.is_low() {
-            wait_for_button_release(enter).await;
-            wait_for_button_release(up).await;
-            wait_for_button_release(down).await;
+            wait_for_release(enter).await;
+            wait_for_release(up).await;
+            wait_for_release(down).await;
             set_mode(ControlMode::Idle).await;
             return Screen::ModeSelect;
         }
@@ -349,7 +348,7 @@ async fn fault_screen(lcd: &mut Lcd<'static>, enter: &mut Input<'static>) -> Scr
         display_line(lcd, 1, code.message()).await;
 
         if enter.is_low() {
-            wait_for_button_release(enter).await;
+            wait_for_release(enter).await;
             clear_fault().await;
             Timer::after(Duration::from_millis(100)).await;
             if current_fault().await == FaultCode::None {
@@ -396,9 +395,9 @@ fn fit_to_line(text: &str) -> String<16> {
     buf
 }
 
-async fn wait_for_button_release(button: &mut Input<'static>) {
+async fn wait_for_release(button: &mut Input<'static>) {
     while button.is_low() {
-        Timer::after(Duration::from_millis(20)).await;
+        Timer::after(Duration::from_millis(10)).await;
     }
 }
 
@@ -407,36 +406,40 @@ enum ButtonPressed {
     Up,
     Down,
     Enter,
-    None,
 }
 
-async fn wait_for_any_button(
+async fn wait_for_press(
     up: &mut Input<'static>,
     down: &mut Input<'static>,
     enter: &mut Input<'static>,
 ) -> ButtonPressed {
     loop {
-        if up.is_low() {
-            Timer::after(Duration::from_millis(20)).await;
-            if up.is_low() {
-                wait_for_button_release(up).await;
+        let pressed = {
+            let mut up_wait = pin!(up.wait_for_falling_edge());
+            let mut down_wait = pin!(down.wait_for_falling_edge());
+            let mut enter_wait = pin!(enter.wait_for_falling_edge());
+
+            select3(up_wait.as_mut(), down_wait.as_mut(), enter_wait.as_mut()).await
+        };
+
+        match pressed {
+            Either3::First(_) => {
+                debounce_and_release(up).await;
                 return ButtonPressed::Up;
             }
-        }
-        if down.is_low() {
-            Timer::after(Duration::from_millis(20)).await;
-            if down.is_low() {
-                wait_for_button_release(down).await;
+            Either3::Second(_) => {
+                debounce_and_release(down).await;
                 return ButtonPressed::Down;
             }
-        }
-        if enter.is_low() {
-            Timer::after(Duration::from_millis(20)).await;
-            if enter.is_low() {
-                wait_for_button_release(enter).await;
+            Either3::Third(_) => {
+                debounce_and_release(enter).await;
                 return ButtonPressed::Enter;
             }
         }
-        Timer::after(Duration::from_millis(10)).await;
     }
+}
+
+async fn debounce_and_release(button: &mut Input<'static>) {
+    Timer::after(Duration::from_millis(20)).await;
+    wait_for_release(button).await;
 }

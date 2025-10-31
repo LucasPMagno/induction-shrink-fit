@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use defmt::info;
 use embassy_executor::Spawner;
 use embassy_rp::{
     adc::{Adc, Async, Channel, Config as AdcConfig, InterruptHandler},
@@ -188,5 +189,6 @@ async fn main(spawner: Spawner) {
     // ------------------------------------------------------------------------------------------
     loop {
         Timer::after(Duration::from_secs(1)).await;
+        // info!("alive");
     }
 }
