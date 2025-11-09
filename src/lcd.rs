@@ -36,8 +36,8 @@ const LCD_MOVERIGHT: u8 = 0x04;
 
 // Timing constants
 // Adjust as needed for your particular LCD or microsecond constraints.
-const E_PULSE_US: u32 = 500; // 500us
-const E_DELAY_US: u32 = 500; // 500us
+const E_PULSE_US: u32 = 50; // 500us
+const E_DELAY_US: u32 = 50; // 500us
 const HOMEDELAY_MS: u64 = 50; // 50ms
 
 ///////////////////////////////////////////////////////////////////////////////

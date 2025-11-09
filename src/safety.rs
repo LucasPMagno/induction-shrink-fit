@@ -4,7 +4,7 @@ use embassy_time::{Duration, Timer};
 
 use crate::state::{
     FaultCode, COIL_TEMP_LIMIT_C, FAULT_STATE, MEASUREMENTS, MODULE_TEMP_LIMIT_C, PCB_TEMP_LIMIT_C,
-    POWER_LIMIT_KW,
+    POWER_LIMIT_KW, CURRENT_LIMIT_A,
 };
 
 const POWER_OVERSHOOT_MARGIN: f32 = 1.05;
@@ -62,6 +62,9 @@ async fn evaluate_fault(
 
     if meas.coil_power_kw > POWER_LIMIT_KW * POWER_OVERSHOOT_MARGIN {
         return FaultCode::PowerLimit;
+    }
+    if meas.coil_current_rms_a > CURRENT_LIMIT_A {
+        return FaultCode::CurrentLimit;
     }
     if meas.coil_temp_c > COIL_TEMP_LIMIT_C {
         return FaultCode::CoilOverTemp;

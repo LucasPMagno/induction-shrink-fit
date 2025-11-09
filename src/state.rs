@@ -92,6 +92,7 @@ pub enum FaultCode {
     GateDriverFault,
     GateDriverNotReady,
     SensorFault,
+    CurrentLimit,
 }
 
 impl FaultCode {
@@ -106,6 +107,7 @@ impl FaultCode {
             FaultCode::GateDriverFault => "Gate driver fault",
             FaultCode::GateDriverNotReady => "Gate driver not ready",
             FaultCode::SensorFault => "Sensor fault",
+            FaultCode::CurrentLimit => "Current limit exceeded",
         }
     }
 }
@@ -130,6 +132,7 @@ impl FaultState {
 }
 
 pub const POWER_LIMIT_KW: f32 = 10.0;
+pub const CURRENT_LIMIT_A: f32 = 150.0;
 pub const COIL_TEMP_LIMIT_C: f32 = 80.0;
 pub const MODULE_TEMP_LIMIT_C: f32 = 85.0;
 pub const PCB_TEMP_LIMIT_C: f32 = 85.0;

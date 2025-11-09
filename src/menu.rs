@@ -15,10 +15,10 @@ use crate::{
 };
 
 const MANUAL_STEP_KW: f32 = 0.5;
-const TEMP_STEP_C: f32 = 5.0;
+const TEMP_STEP_C: f32 = 10.0;
 const TEMP_MIN_C: f32 = 40.0;
 const TEMP_MAX_C: f32 = 350.0;
-const STATUS_REFRESH_MS: u64 = 250;
+const STATUS_REFRESH_MS: u64 = 50;
 
 #[embassy_executor::task]
 pub async fn menu_task(
