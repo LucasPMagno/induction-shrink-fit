@@ -1,16 +1,21 @@
 use defmt::*;
-use embassy_futures::yield_now;
-use embassy_rp::adc::{Adc, Async, Channel};
-use embassy_rp::gpio::Input;
+use embassy_hal_internal::PeripheralRef;
+use embassy_rp::{
+    adc::{Adc, Async, Channel},
+    clocks,
+    gpio::Input,
+};
 use embassy_time::{Duration, Instant, Timer};
 use libm::{logf, sqrtf};
 
 use crate::{ads7828::Ads7828, mlx90614::Mlx90614, state::MEASUREMENTS};
 
-const PAIRS_PER_WINDOW: u32 = 1024;
-const ADC_REF_V: f32 = 3.3;
+const TARGET_SAMPLE_RATE_HZ: u32 = 150_000;
+const PAIRS_PER_BATCH: usize = 512;
+const DMA_BUFFER_LEN: usize = PAIRS_PER_BATCH * 2;
+const ADC_REF_V: f32 = 3.321;
 const VDC_GAIN: f32 = 0.0018615088;
-const CURRENT_CENTER_V: f32 = 1.25;
+const CURRENT_CENTER_V: f32 = 1.245; //1.252 in theory but measured slightly lower
 const CURRENT_SENSITIVITY_A_PER_V: f32 = 1280.0; // 0.625 V -> 800 A
 const POWER_SMOOTH_FACTOR: f32 = 0.2;
 const MAX_VOLTAGE_V: f32 = 1000.0;
@@ -29,59 +34,68 @@ const MODULE_NTC_T0_C: f32 = 25.0;
 pub async fn adc_task(
     adc: &'static mut Adc<'static, Async>,
     channels: &'static mut [Channel<'static>; 2],
+    mut dma: PeripheralRef<'static, embassy_rp::peripherals::DMA_CH0>,
 ) {
-    let mut acc_v_sq = 0.0f32;
-    let mut acc_i_sq = 0.0f32;
-    let mut acc_vi = 0.0f32;
-    let mut pairs_accumulated: u32 = 0;
-
-    let (v_chan_slice, i_chan_slice) = channels.split_at_mut(1);
-    let v_channel = &mut v_chan_slice[0];
-    let i_channel = &mut i_chan_slice[0];
+    static mut DMA_BUFFER: [u16; DMA_BUFFER_LEN] = [0; DMA_BUFFER_LEN];
+    let channel_count = channels.len() as u32;
+    let adc_clk = clocks::clk_adc_freq();
+    let div = 0;
+    // let mut div = if channel_count == 0 {
+    //     0
+    // } else {
+    //     adc_clk
+    //         .saturating_div(TARGET_SAMPLE_RATE_HZ.saturating_mul(channel_count))
+    //         .saturating_sub(1)
+    // };
+    // if div > u16::MAX as u32 {
+    //     div = u16::MAX as u32;
+    // }
+    // let div = div as u16;
 
     loop {
-        let v_sample = adc.read(v_channel).await.unwrap_or(0) as f32;
-        let i_sample = adc.read(i_channel).await.unwrap_or(0) as f32;
-
-        let v_adc = v_sample * (ADC_REF_V / 4095.0);
-        let i_adc = i_sample * (ADC_REF_V / 4095.0);
-
-        let dc_voltage = (v_adc / VDC_GAIN).clamp(0.0, MAX_VOLTAGE_V);
-        let coil_current = ((i_adc - CURRENT_CENTER_V) * CURRENT_SENSITIVITY_A_PER_V)
-            .clamp(-MAX_CURRENT_A, MAX_CURRENT_A);
-
-        acc_v_sq += dc_voltage * dc_voltage;
-        acc_i_sq += coil_current * coil_current;
-        acc_vi += dc_voltage * coil_current;
-        pairs_accumulated += 1;
-
-        if pairs_accumulated >= PAIRS_PER_WINDOW {
-            let count = pairs_accumulated as f32;
-            let vrms = sqrtf((acc_v_sq / count).max(0.0));
-            let irms = sqrtf((acc_i_sq / count).max(0.0));
-            let power_w = (acc_vi / count).max(0.0);
-            let power_kw = (power_w / 1000.0).clamp(0.0, 20.0);
-
-            {
-                let mut guard = MEASUREMENTS.lock().await;
-                guard.dc_voltage_v = smooth_value(guard.dc_voltage_v, vrms);
-                guard.coil_current_rms_a = smooth_value(guard.coil_current_rms_a, irms);
-                guard.coil_power_kw = smooth_value(guard.coil_power_kw, power_kw);
-                guard.valid = true;
-            }
-            info!(
-                "Vdc: {} V, Icoil: {} A, Pcoil: {} kW",
-                vrms,
-                irms,
-                power_kw
-            );
-            acc_v_sq = 0.0;
-            acc_i_sq = 0.0;
-            acc_vi = 0.0;
-            pairs_accumulated = 0;
+        let buffer = unsafe { &mut DMA_BUFFER };
+        if let Err(_e) = adc
+            .read_many_multichannel(&mut channels[..], buffer, div, dma.reborrow())
+            .await
+        {
+            warn!("ADC DMA error");
+            Timer::after(Duration::from_millis(5)).await;
+            continue;
         }
 
-        yield_now().await;
+        let mut sum_v_sq = 0.0f32;
+        let mut sum_i_sq = 0.0f32;
+        let mut sum_vi = 0.0f32;
+
+        for pair in buffer.chunks_exact(2) {
+            let v_sample = pair[0] as f32;
+            let i_sample = pair[1] as f32;
+
+            let v_adc = v_sample * (ADC_REF_V / 4095.0);
+            let i_adc = i_sample * (ADC_REF_V / 4095.0);
+
+            let dc_voltage = (v_adc / VDC_GAIN).clamp(0.0, MAX_VOLTAGE_V);
+            let coil_current = ((i_adc - CURRENT_CENTER_V) * CURRENT_SENSITIVITY_A_PER_V)
+                .clamp(-MAX_CURRENT_A, MAX_CURRENT_A);
+
+            sum_v_sq += dc_voltage * dc_voltage;
+            sum_i_sq += coil_current * coil_current;
+            sum_vi += dc_voltage * coil_current;
+        }
+
+        let samples = PAIRS_PER_BATCH as f32;
+        let vrms = sqrtf((sum_v_sq / samples).max(0.0));
+        let irms = sqrtf((sum_i_sq / samples).max(0.0));
+        let power_kw = ((sum_vi / samples) / 1000.0).clamp(0.0, 20.0);
+        info!("Vdc: {} V, Irms: {} A, P: {} kW", vrms, irms, power_kw);
+        {
+            let mut guard = MEASUREMENTS.lock().await;
+            guard.dc_voltage_v = smooth_value(guard.dc_voltage_v, vrms);
+            guard.coil_current_rms_a = smooth_value(guard.coil_current_rms_a, irms);
+            guard.coil_power_kw = smooth_value(guard.coil_power_kw, power_kw);
+            guard.valid = true;
+        }
+        Timer::after(Duration::from_millis(50)).await;
     }
 }
 
@@ -100,6 +114,7 @@ pub async fn ads_task(ads: &'static Ads7828<'static>) {
                     let mut guard = MEASUREMENTS.lock().await;
                     guard.coil_temp_c = smooth_value(guard.coil_temp_c, coil_temp_c);
                     guard.pcb_temp_c = smooth_value(guard.pcb_temp_c, pcb_temp_c);
+                    info!("Coil temp: {} C, PCB temp: {} C", coil_temp_c, pcb_temp_c);
                 }
             }
             Err(_e) => warn!("ADS7828 error"),
@@ -118,6 +133,7 @@ pub async fn mlx_task(
             Ok(t) => {
                 let mut guard = MEASUREMENTS.lock().await;
                 guard.object_temp_c = smooth_value(guard.object_temp_c, t);
+                info!("IR object temp: {} C", t);
             }
             Err(_e) => warn!("MLX90614 read error"),
         }
@@ -159,6 +175,7 @@ pub async fn sic_temp_task(mut pin: Input<'static>) {
             let mut guard = MEASUREMENTS.lock().await;
             guard.module_temp_c = smooth_value(guard.module_temp_c, module_temp_c);
         }
+        info!("SiC module temp: {} C", module_temp_c);
 
         Timer::after(Duration::from_millis(50)).await;
     }

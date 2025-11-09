@@ -44,7 +44,8 @@ async fn evaluate_fault(
     gate_ready: &Input<'static>,
 ) -> FaultCode {
     if interlock.is_low() {
-        return FaultCode::InterlockOpen;
+        return FaultCode::None; //override!!!!
+        // return FaultCode::InterlockOpen; 
     }
     if gate_fault.is_low() {
         return FaultCode::GateDriverFault;

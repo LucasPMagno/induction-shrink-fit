@@ -413,28 +413,26 @@ async fn wait_for_press(
     down: &mut Input<'static>,
     enter: &mut Input<'static>,
 ) -> ButtonPressed {
-    loop {
-        let pressed = {
-            let mut up_wait = pin!(up.wait_for_falling_edge());
-            let mut down_wait = pin!(down.wait_for_falling_edge());
-            let mut enter_wait = pin!(enter.wait_for_falling_edge());
+    let pressed = {
+        let mut up_wait = pin!(up.wait_for_falling_edge());
+        let mut down_wait = pin!(down.wait_for_falling_edge());
+        let mut enter_wait = pin!(enter.wait_for_falling_edge());
 
-            select3(up_wait.as_mut(), down_wait.as_mut(), enter_wait.as_mut()).await
-        };
+        select3(up_wait.as_mut(), down_wait.as_mut(), enter_wait.as_mut()).await
+    };
 
-        match pressed {
-            Either3::First(_) => {
-                debounce_and_release(up).await;
-                return ButtonPressed::Up;
-            }
-            Either3::Second(_) => {
-                debounce_and_release(down).await;
-                return ButtonPressed::Down;
-            }
-            Either3::Third(_) => {
-                debounce_and_release(enter).await;
-                return ButtonPressed::Enter;
-            }
+    match pressed {
+        Either3::First(_) => {
+            debounce_and_release(up).await;
+            ButtonPressed::Up
+        }
+        Either3::Second(_) => {
+            debounce_and_release(down).await;
+            ButtonPressed::Down
+        }
+        Either3::Third(_) => {
+            debounce_and_release(enter).await;
+            ButtonPressed::Enter
         }
     }
 }

@@ -10,9 +10,9 @@ use crate::{
 };
 
 const DEADTIME_NS: u32 = 512;
-const BASE_FREQUENCY_HZ: f32 = 29_700.0;
-const MIN_FREQUENCY_HZ: f32 = 26_000.0;
-const MAX_FREQUENCY_HZ: f32 = 32_000.0;
+const BASE_FREQUENCY_HZ: f32 = 45_000.0;
+const MIN_FREQUENCY_HZ: f32 = 29_700.0;
+const MAX_FREQUENCY_HZ: f32 = 45_000.0;
 const CONTROL_PERIOD: Duration = Duration::from_millis(10);
 const CONTROL_DT_S: f32 = 0.010;
 const RUN_DEBOUNCE: Duration = Duration::from_millis(80);
@@ -111,7 +111,7 @@ pub async fn control_task(
                         .clamp(0.0, POWER_LIMIT_KW);
                 }
 
-                if heating {
+                if heating & !target_reached {
                     switching_freq =
                         power_ctrl.update(power_setpoint, measured_power, CONTROL_DT_S);
                     pwm_enable(pwm, DEADTIME_NS, switching_freq as u32);
@@ -173,8 +173,8 @@ impl PowerController {
     }
 
     fn update(&mut self, setpoint_kw: f32, measured_kw: f32, dt: f32) -> f32 {
-        const KP: f32 = 60.0;
-        const KI: f32 = 8.0;
+        const KP: f32 = -60.0;
+        const KI: f32 = -8.0;
         let error = setpoint_kw - measured_kw;
         self.integrator = (self.integrator + error * KI * dt).clamp(-2000.0, 2000.0);
         self.freq_hz =
@@ -197,8 +197,8 @@ impl TemperatureController {
     }
 
     fn update(&mut self, target_c: f32, measured_c: f32, dt: f32) -> f32 {
-        const KP: f32 = 0.08;
-        const KI: f32 = 0.03;
+        const KP: f32 = -0.08;
+        const KI: f32 = -0.03;
         let error = (target_c - measured_c).max(-20.0);
         self.integrator = (self.integrator + error * KI * dt).clamp(0.0, POWER_LIMIT_KW);
         (KP * error + self.integrator).clamp(0.0, POWER_LIMIT_KW)

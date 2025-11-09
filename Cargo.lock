@@ -1052,6 +1052,7 @@ dependencies = [
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",
+ "embassy-hal-internal",
  "embassy-macros",
  "embassy-rp",
  "embassy-sync",

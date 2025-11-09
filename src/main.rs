@@ -1,8 +1,8 @@
 #![no_std]
 #![no_main]
 
-use defmt::info;
 use embassy_executor::Spawner;
+use embassy_hal_internal::Peripheral;
 use embassy_rp::{
     adc::{Adc, Async, Channel, Config as AdcConfig, InterruptHandler},
     bind_interrupts,
@@ -161,7 +161,9 @@ async fn main(spawner: Spawner) {
         Channel::new_pin(p.PIN_26, Pull::None),
         Channel::new_pin(p.PIN_29, Pull::None),
     ]);
-    spawner.spawn(adc_task(adc, channels)).unwrap();
+    spawner
+        .spawn(adc_task(adc, channels, p.DMA_CH0.into_ref()))
+        .unwrap();
 
     // ------------------------------------------------------------------------------------------
     // SiC module temperature duty monitor
