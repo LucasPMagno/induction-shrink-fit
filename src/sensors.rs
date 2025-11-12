@@ -32,6 +32,7 @@ const PWM_HIGH_V: f32 = 4.5;
 const MODULE_NTC_BETA: f32 = 3468.0;
 const MODULE_NTC_R0: f32 = 5_000.0;
 const MODULE_NTC_T0_C: f32 = 25.0;
+const COIL_SENSOR_DISCONNECT_V: f32 = 4.5;
 
 pub fn load_sic_temp_program<'d>(common: &mut Common<'d, PIO0>) -> LoadedProgram<'d, PIO0> {
     let prg = pio_asm!(
@@ -156,12 +157,25 @@ pub async fn ads_task(ads: &'static Ads7828<'static>) {
 
                 let coil_temp_c = ntc_pullup_temp(coil_temp_v);
                 let pcb_temp_c = pcb_temp_v_to_c(pcb_temp_v);
+                let coil_disconnected = coil_temp_v >= COIL_SENSOR_DISCONNECT_V;
 
                 {
                     let mut guard = MEASUREMENTS.lock().await;
-                    guard.coil_temp_c = smooth_value(guard.coil_temp_c, coil_temp_c);
+                    guard.coil_temp_disconnected = coil_disconnected;
+                    if !coil_disconnected {
+                        guard.coil_temp_c = smooth_value(guard.coil_temp_c, coil_temp_c);
+                    }
                     guard.pcb_temp_c = smooth_value(guard.pcb_temp_c, pcb_temp_c);
-                    info!("Coil temp: {} C, PCB temp: {} C", coil_temp_c, pcb_temp_c);
+                    info!(
+                        "Coil temp: {} C{}, PCB temp: {} C",
+                        coil_temp_c,
+                        if coil_disconnected {
+                            " (disconnected)"
+                        } else {
+                            ""
+                        },
+                        pcb_temp_c
+                    );
                 }
             }
             Err(_e) => warn!("ADS7828 error"),
@@ -212,7 +226,7 @@ pub async fn sic_temp_task(mut sm: StateMachine<'static, PIO0, 0>) {
 
         let duty = (duty_sum / SAMPLES as f32).clamp(PWM_MIN_DUTY, PWM_MAX_DUTY);
         let voltage = duty_to_voltage(duty);
-        let resistance = voltage / 0.000203;
+        let resistance = (voltage / 0.000203) - 5100.0; // 5.1k in series with current source to stay within 0.6-4.5V range
         let module_temp_c = ntc_beta_temp(resistance);
 
         {
@@ -220,8 +234,8 @@ pub async fn sic_temp_task(mut sm: StateMachine<'static, PIO0, 0>) {
             guard.module_temp_c = smooth_value(guard.module_temp_c, module_temp_c);
         }
         info!(
-            "SiC module temp: duty {} voltage {} temp {} C",
-            duty, voltage, module_temp_c
+            "SiC module temp: duty {} resistance {} temp {} C",
+            duty, resistance, module_temp_c
         );
 
         Timer::after(Duration::from_millis(500)).await;

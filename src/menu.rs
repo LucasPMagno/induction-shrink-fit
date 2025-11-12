@@ -8,9 +8,10 @@ use heapless::String;
 
 use crate::{
     lcd::Lcd,
-    safety::{clear_fault, current_fault},
+    safety::current_fault,
     state::{
-        ControlMode, FaultCode, CONTROL_SETTINGS, CONTROL_STATUS, MEASUREMENTS, POWER_LIMIT_KW,
+        ControlMode, FaultCode, Measurements, COIL_TEMP_LIMIT_C, CONTROL_SETTINGS, CONTROL_STATUS,
+        CURRENT_LIMIT_A, MEASUREMENTS, MODULE_TEMP_LIMIT_C, PCB_TEMP_LIMIT_C, POWER_LIMIT_KW,
     },
 };
 
@@ -37,7 +38,7 @@ pub async fn menu_task(
     loop {
         if let FaultCode::None = current_fault().await {
         } else {
-            screen = fault_screen(&mut lcd, &mut enter).await;
+            screen = fault_screen(&mut lcd).await;
             continue;
         }
 
@@ -336,27 +337,39 @@ async fn cooldown_screen(
     }
 }
 
-async fn fault_screen(lcd: &mut Lcd<'static>, enter: &mut Input<'static>) -> Screen {
+async fn fault_screen(lcd: &mut Lcd<'static>) -> Screen {
+    let mut last_code = FaultCode::None;
+    let mut last_header = String::<16>::new();
+    let mut last_detail = String::<16>::new();
+
     loop {
         let code = current_fault().await;
         if code == FaultCode::None {
+            lcd.clear().await;
+            display_line(lcd, 0, "Fault cleared").await;
+            Timer::after(Duration::from_millis(400)).await;
             return Screen::ModeSelect;
         }
 
-        lcd.clear().await;
-        display_line(lcd, 0, "FAULT DETECTED").await;
-        display_line(lcd, 1, code.message()).await;
+        let meas = MEASUREMENTS.lock().await.clone();
+        let header = fault_header_line(code);
+        let detail = fault_detail_line(code, &meas);
 
-        if enter.is_low() {
-            wait_for_release(enter).await;
-            clear_fault().await;
-            Timer::after(Duration::from_millis(100)).await;
-            if current_fault().await == FaultCode::None {
-                lcd.clear().await;
-                display_line(lcd, 0, "Fault cleared").await;
-                Timer::after(Duration::from_millis(500)).await;
-                return Screen::ModeSelect;
-            }
+        if code != last_code {
+            lcd.clear().await;
+            last_code = code;
+            last_header.clear();
+            last_detail.clear();
+        }
+
+        if header != last_header {
+            display_line(lcd, 0, header.as_str()).await;
+            last_header = header;
+        }
+
+        if detail != last_detail {
+            display_line(lcd, 1, detail.as_str()).await;
+            last_detail = detail;
         }
 
         Timer::after(Duration::from_millis(200)).await;
@@ -393,6 +406,45 @@ fn fit_to_line(text: &str) -> String<16> {
         buf.push(' ').ok();
     }
     buf
+}
+
+fn fault_header_line(code: FaultCode) -> String<16> {
+    fit_to_line(code.lcd_label())
+}
+
+fn fault_detail_line(code: FaultCode, meas: &Measurements) -> String<16> {
+    match code {
+        FaultCode::PowerLimit => power_detail_line(meas.coil_power_kw),
+        FaultCode::CoilOverTemp => temp_detail_line("Coil ", meas.coil_temp_c, COIL_TEMP_LIMIT_C),
+        FaultCode::ModuleOverTemp => {
+            temp_detail_line("Mod ", meas.module_temp_c, MODULE_TEMP_LIMIT_C)
+        }
+        FaultCode::PcbOverTemp => temp_detail_line("PCB ", meas.pcb_temp_c, PCB_TEMP_LIMIT_C),
+        FaultCode::CurrentLimit => current_detail_line(meas.coil_current_rms_a),
+        FaultCode::InterlockOpen => fit_to_line("Check E-STOP"),
+        FaultCode::GateDriverFault => fit_to_line("Gate drv fault"),
+        FaultCode::GateDriverNotReady => fit_to_line("Gate drv wait"),
+        FaultCode::SensorFault => fit_to_line("Coil NTC open"),
+        FaultCode::None => fit_to_line("All clear"),
+    }
+}
+
+fn temp_detail_line(label: &str, value: f32, limit: f32) -> String<16> {
+    let mut buf = String::<16>::new();
+    let _ = write!(buf, "{}{:>3.0}>{:.0}C", label, value, limit);
+    fit_to_line(buf.as_str())
+}
+
+fn power_detail_line(power_kw: f32) -> String<16> {
+    let mut buf = String::<16>::new();
+    let _ = write!(buf, "P {:>4.1}>{:.0}kW", power_kw, POWER_LIMIT_KW);
+    fit_to_line(buf.as_str())
+}
+
+fn current_detail_line(current_a: f32) -> String<16> {
+    let mut buf = String::<16>::new();
+    let _ = write!(buf, "I {:>3.0}>{:.0}A", current_a, CURRENT_LIMIT_A);
+    fit_to_line(buf.as_str())
 }
 
 async fn wait_for_release(button: &mut Input<'static>) {

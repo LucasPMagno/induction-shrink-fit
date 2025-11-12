@@ -64,6 +64,7 @@ pub struct Measurements {
     pub module_temp_c: f32,
     pub object_temp_c: f32,
     pub valid: bool,
+    pub coil_temp_disconnected: bool,
 }
 
 impl Measurements {
@@ -77,6 +78,7 @@ impl Measurements {
             module_temp_c: 0.0,
             object_temp_c: 0.0,
             valid: false,
+            coil_temp_disconnected: false,
         }
     }
 }
@@ -106,8 +108,23 @@ impl FaultCode {
             FaultCode::InterlockOpen => "Interlock open",
             FaultCode::GateDriverFault => "Gate driver fault",
             FaultCode::GateDriverNotReady => "Gate driver not ready",
-            FaultCode::SensorFault => "Sensor fault",
+            FaultCode::SensorFault => "Coil temperature sensor fault",
             FaultCode::CurrentLimit => "Current limit exceeded",
+        }
+    }
+
+    pub const fn lcd_label(self) -> &'static str {
+        match self {
+            FaultCode::None => "All clear",
+            FaultCode::PowerLimit => "Power limit!",
+            FaultCode::CoilOverTemp => "Coil overtemp",
+            FaultCode::ModuleOverTemp => "Module overtemp",
+            FaultCode::PcbOverTemp => "PCB overtemp",
+            FaultCode::InterlockOpen => "Interlock open",
+            FaultCode::GateDriverFault => "Gate drv fault",
+            FaultCode::GateDriverNotReady => "Gate drv wait",
+            FaultCode::SensorFault => "Coil sns fault",
+            FaultCode::CurrentLimit => "Current limit",
         }
     }
 }
@@ -134,7 +151,7 @@ impl FaultState {
 pub const POWER_LIMIT_KW: f32 = 10.0;
 pub const CURRENT_LIMIT_A: f32 = 150.0;
 pub const COIL_TEMP_LIMIT_C: f32 = 80.0;
-pub const MODULE_TEMP_LIMIT_C: f32 = 35.0;
+pub const MODULE_TEMP_LIMIT_C: f32 = 85.0;
 pub const PCB_TEMP_LIMIT_C: f32 = 85.0;
 
 pub static MEASUREMENTS: Mutex<CriticalSectionRawMutex, Measurements> =
