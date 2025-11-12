@@ -8,6 +8,8 @@ use embassy_rp::{
     bind_interrupts,
     gpio::{Drive, Input, Level, Output, Pull},
     i2c::{Config as I2cConfig, I2c},
+    peripherals::PIO0,
+    pio::{self, Pio},
     pwm::{Config as PwmConfig, Pwm},
     Peripherals,
 };
@@ -32,7 +34,9 @@ use lcd::Lcd;
 use menu::menu_task;
 use mlx90614::Mlx90614;
 use safety::safety_task;
-use sensors::{adc_task, ads_task, mlx_task, sic_temp_task};
+use sensors::{
+    adc_task, ads_task, init_sic_temp_capture, load_sic_temp_program, mlx_task, sic_temp_task,
+};
 use utils::pwm_disable;
 
 static PWM_DRIVE_CELL: StaticCell<Pwm<'static>> = StaticCell::new();
@@ -51,9 +55,22 @@ bind_interrupts!(struct AdcIrqs {
     ADC_IRQ_FIFO => InterruptHandler;
 });
 
+bind_interrupts!(struct PioIrqs {
+    PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
+});
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p: Peripherals = embassy_rp::init(Default::default());
+
+    let Pio {
+        common: mut sic_pio_common,
+        sm0: sic_temp_sm,
+        ..
+    } = Pio::new(p.PIO0, PioIrqs);
+    let sic_temp_program = load_sic_temp_program(&mut sic_pio_common);
+    let sic_temp_pin = sic_pio_common.make_pio_pin(p.PIN_4);
+    let sic_temp_sm = init_sic_temp_capture(&sic_temp_program, sic_temp_sm, sic_temp_pin);
 
     // ------------------------------------------------------------------------------------------
     // GPIO setups
@@ -69,7 +86,6 @@ async fn main(spawner: Spawner) {
     let down_pin = Input::new(p.PIN_12, Pull::Up);
     let up_pin = Input::new(p.PIN_13, Pull::Up);
     let enter_pin = Input::new(p.PIN_27, Pull::Up);
-    let sic_temp_pin = Input::new(p.PIN_4, Pull::Down);
 
     // ------------------------------------------------------------------------------------------
     // PWM setup for SiC MOSFET
@@ -168,7 +184,7 @@ async fn main(spawner: Spawner) {
     // ------------------------------------------------------------------------------------------
     // SiC module temperature duty monitor
     // ------------------------------------------------------------------------------------------
-    spawner.spawn(sic_temp_task(sic_temp_pin)).unwrap();
+    spawner.spawn(sic_temp_task(sic_temp_sm)).unwrap();
 
     // ------------------------------------------------------------------------------------------
     // Safety monitor

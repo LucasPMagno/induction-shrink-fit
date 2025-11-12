@@ -2,10 +2,13 @@ use defmt::*;
 use embassy_hal_internal::PeripheralRef;
 use embassy_rp::{
     adc::{Adc, Async, Channel},
-    clocks,
-    gpio::Input,
+    gpio::Pull,
+    peripherals::PIO0,
+    pio::{
+        self, program::pio_asm, Common, Direction as PioDirection, LoadedProgram, Pin, StateMachine,
+    },
 };
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Timer};
 use libm::{logf, sqrtf};
 
 use crate::{ads7828::Ads7828, mlx90614::Mlx90614, state::MEASUREMENTS};
@@ -30,6 +33,52 @@ const MODULE_NTC_BETA: f32 = 3468.0;
 const MODULE_NTC_R0: f32 = 5_000.0;
 const MODULE_NTC_T0_C: f32 = 25.0;
 
+pub fn load_sic_temp_program<'d>(common: &mut Common<'d, PIO0>) -> LoadedProgram<'d, PIO0> {
+    let prg = pio_asm!(
+        ".wrap_target",
+        "pull block",
+        "wait 0 pin 0",
+        "wait 1 pin 0",
+        "set x, 0",
+        "mov x, ~x",
+        "high_loop:",
+        "jmp pin high_active",
+        "jmp high_done",
+        "high_active:",
+        "jmp x-- high_loop",
+        "high_done:",
+        "mov isr, ~x",
+        "push block",
+        "set y, 0",
+        "mov y, ~y",
+        "low_loop:",
+        "jmp pin low_done",
+        "jmp y-- low_loop",
+        "low_done:",
+        "mov isr, ~y",
+        "push block",
+        ".wrap"
+    );
+
+    common.load_program(&prg.program)
+}
+
+pub fn init_sic_temp_capture<'d>(
+    program: &LoadedProgram<'d, PIO0>,
+    mut sm: StateMachine<'d, PIO0, 0>,
+    mut pin: Pin<'d, PIO0>,
+) -> StateMachine<'d, PIO0, 0> {
+    pin.set_pull(Pull::None);
+    sm.set_pin_dirs(PioDirection::In, &[&pin]);
+
+    let mut cfg = pio::Config::default();
+    cfg.use_program(program, &[]);
+    cfg.set_in_pins(&[&pin]);
+    cfg.set_jmp_pin(&pin);
+    sm.set_config(&cfg);
+    sm
+}
+
 #[embassy_executor::task]
 pub async fn adc_task(
     adc: &'static mut Adc<'static, Async>,
@@ -37,8 +86,6 @@ pub async fn adc_task(
     mut dma: PeripheralRef<'static, embassy_rp::peripherals::DMA_CH0>,
 ) {
     static mut DMA_BUFFER: [u16; DMA_BUFFER_LEN] = [0; DMA_BUFFER_LEN];
-    let channel_count = channels.len() as u32;
-    let adc_clk = clocks::clk_adc_freq();
     let div = 0;
     // let mut div = if channel_count == 0 {
     //     0
@@ -142,25 +189,22 @@ pub async fn mlx_task(
 }
 
 #[embassy_executor::task]
-pub async fn sic_temp_task(mut pin: Input<'static>) {
+pub async fn sic_temp_task(mut sm: StateMachine<'static, PIO0, 0>) {
     const SAMPLES: usize = 128;
+
+    sm.set_enable(true);
 
     loop {
         let mut duty_sum = 0.0f32;
         let mut collected = 0usize;
 
         while collected < SAMPLES {
-            pin.wait_for_rising_edge().await;
-            let rise = Instant::now();
-            pin.wait_for_falling_edge().await;
-            let fall = Instant::now();
-            pin.wait_for_rising_edge().await;
-            let next_rise = Instant::now();
-
-            let high = duration_to_secs(fall - rise);
-            let period = duration_to_secs(next_rise - rise);
-            if period > 0.0 {
-                let duty = (high / period).clamp(PWM_MIN_DUTY, PWM_MAX_DUTY);
+            sm.tx().wait_push(0).await;
+            let high_cycles = sm.rx().wait_pull().await as f32;
+            let low_cycles = sm.rx().wait_pull().await as f32;
+            let total = high_cycles + low_cycles;
+            if total > 0.0 {
+                let duty = (high_cycles / total).clamp(PWM_MIN_DUTY, PWM_MAX_DUTY);
                 duty_sum += duty;
                 collected += 1;
             }
@@ -175,9 +219,12 @@ pub async fn sic_temp_task(mut pin: Input<'static>) {
             let mut guard = MEASUREMENTS.lock().await;
             guard.module_temp_c = smooth_value(guard.module_temp_c, module_temp_c);
         }
-        info!("SiC module temp: {} C", module_temp_c);
+        info!(
+            "SiC module temp: duty {} voltage {} temp {} C",
+            duty, voltage, module_temp_c
+        );
 
-        Timer::after(Duration::from_millis(50)).await;
+        Timer::after(Duration::from_millis(500)).await;
     }
 }
 
@@ -213,8 +260,11 @@ fn pcb_temp_v_to_c(voltage: f32) -> f32 {
 }
 
 fn duty_to_voltage(duty: f32) -> f32 {
-    let slope = (PWM_HIGH_V - PWM_LOW_V) / (PWM_HIGH_DUTY - PWM_LOW_DUTY);
-    PWM_LOW_V + slope * (duty - PWM_LOW_DUTY)
+    // Datasheet: duty grows from 10%->88% while VAIN drops 4.5 V->0.6 V (linear mapping).
+    let duty = duty.clamp(PWM_LOW_DUTY, PWM_HIGH_DUTY);
+    let duty_span = PWM_HIGH_DUTY - PWM_LOW_DUTY;
+    let decreasing_ratio = (PWM_HIGH_DUTY - duty) / duty_span;
+    PWM_LOW_V + decreasing_ratio * (PWM_HIGH_V - PWM_LOW_V)
 }
 
 fn ntc_beta_temp(resistance: f32) -> f32 {
@@ -224,8 +274,4 @@ fn ntc_beta_temp(resistance: f32) -> f32 {
     let t0_k = MODULE_NTC_T0_C + 273.15;
     let inv_t = 1.0 / t0_k + logf(resistance / MODULE_NTC_R0) / MODULE_NTC_BETA;
     1.0 / inv_t - 273.15
-}
-
-fn duration_to_secs(duration: Duration) -> f32 {
-    duration.as_micros() as f32 / 1_000_000.0
 }

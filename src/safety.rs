@@ -3,8 +3,8 @@ use embassy_rp::gpio::Input;
 use embassy_time::{Duration, Timer};
 
 use crate::state::{
-    FaultCode, COIL_TEMP_LIMIT_C, FAULT_STATE, MEASUREMENTS, MODULE_TEMP_LIMIT_C, PCB_TEMP_LIMIT_C,
-    POWER_LIMIT_KW, CURRENT_LIMIT_A,
+    FaultCode, COIL_TEMP_LIMIT_C, CURRENT_LIMIT_A, FAULT_STATE, MEASUREMENTS, MODULE_TEMP_LIMIT_C,
+    PCB_TEMP_LIMIT_C, POWER_LIMIT_KW,
 };
 
 const POWER_OVERSHOOT_MARGIN: f32 = 1.05;
@@ -45,7 +45,7 @@ async fn evaluate_fault(
 ) -> FaultCode {
     if interlock.is_low() {
         return FaultCode::None; //override!!!!
-        // return FaultCode::InterlockOpen; 
+                                // return FaultCode::InterlockOpen;
     }
     if gate_fault.is_low() {
         return FaultCode::GateDriverFault;
