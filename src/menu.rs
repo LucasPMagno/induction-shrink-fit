@@ -1,7 +1,4 @@
 use core::fmt::Write;
-use core::pin::pin;
-
-use embassy_futures::select::{select3, Either3};
 use embassy_rp::gpio::Input;
 use embassy_time::{Duration, Timer};
 use heapless::String;
@@ -38,7 +35,7 @@ pub async fn menu_task(
     loop {
         if let FaultCode::None = current_fault().await {
         } else {
-            screen = fault_screen(&mut lcd).await;
+            screen = fault_screen(&mut lcd, screen).await;
             continue;
         }
 
@@ -121,18 +118,21 @@ async fn mode_select_screen(
         .await;
 
         match wait_for_press(up, down, enter).await {
-            ButtonPressed::Up => {
+            WaitOutcome::Button(ButtonPressed::Up) => {
                 index = (index + 1) % 2;
             }
-            ButtonPressed::Down => {
+            WaitOutcome::Button(ButtonPressed::Down) => {
                 index = (index + 1) % 2;
             }
-            ButtonPressed::Enter => {
+            WaitOutcome::Button(ButtonPressed::Enter) => {
                 return if index == 0 {
                     Screen::ManualConfig
                 } else {
                     Screen::TemperatureConfig
                 };
+            }
+            WaitOutcome::Fault => {
+                return fault_screen(lcd, Screen::ModeSelect).await;
             }
         }
     }
@@ -158,16 +158,19 @@ async fn manual_config_screen(
         display_line(lcd, 1, line.as_str()).await;
 
         match wait_for_press(up, down, enter).await {
-            ButtonPressed::Up => {
+            WaitOutcome::Button(ButtonPressed::Up) => {
                 let next = (value + MANUAL_STEP_KW).clamp(0.0, POWER_LIMIT_KW);
                 set_manual_power(next).await;
             }
-            ButtonPressed::Down => {
+            WaitOutcome::Button(ButtonPressed::Down) => {
                 let next = (value - MANUAL_STEP_KW).clamp(0.0, POWER_LIMIT_KW);
                 set_manual_power(next).await;
             }
-            ButtonPressed::Enter => {
+            WaitOutcome::Button(ButtonPressed::Enter) => {
                 return Screen::ManualStatus;
+            }
+            WaitOutcome::Fault => {
+                return fault_screen(lcd, Screen::ManualConfig).await;
             }
         }
     }
@@ -181,6 +184,10 @@ async fn manual_status_screen(
 ) -> Screen {
     lcd.clear().await;
     loop {
+        if let Some(next) = interrupt_for_fault(lcd, Screen::ManualStatus).await {
+            return next;
+        }
+
         let status = CONTROL_STATUS.lock().await.clone();
         let meas = MEASUREMENTS.lock().await.clone();
         let v_display = meas.dc_voltage_v.clamp(0.0, 999.0);
@@ -230,7 +237,7 @@ async fn temperature_config_screen(
     enter: &mut Input<'static>,
 ) -> Screen {
     lcd.clear().await;
-    display_line(lcd, 0, "Target temperature").await;
+    display_line(lcd, 0, "Target temp").await;
 
     loop {
         let value = {
@@ -243,16 +250,19 @@ async fn temperature_config_screen(
         display_line(lcd, 1, line.as_str()).await;
 
         match wait_for_press(up, down, enter).await {
-            ButtonPressed::Up => {
+            WaitOutcome::Button(ButtonPressed::Up) => {
                 let next = (value + TEMP_STEP_C).clamp(TEMP_MIN_C, TEMP_MAX_C);
                 set_temperature_target(next).await;
             }
-            ButtonPressed::Down => {
+            WaitOutcome::Button(ButtonPressed::Down) => {
                 let next = (value - TEMP_STEP_C).clamp(TEMP_MIN_C, TEMP_MAX_C);
                 set_temperature_target(next).await;
             }
-            ButtonPressed::Enter => {
+            WaitOutcome::Button(ButtonPressed::Enter) => {
                 return Screen::TemperatureStatus;
+            }
+            WaitOutcome::Fault => {
+                return fault_screen(lcd, Screen::TemperatureConfig).await;
             }
         }
     }
@@ -266,6 +276,10 @@ async fn temperature_status_screen(
 ) -> Screen {
     lcd.clear().await;
     loop {
+        if let Some(next) = interrupt_for_fault(lcd, Screen::TemperatureStatus).await {
+            return next;
+        }
+
         let status = CONTROL_STATUS.lock().await.clone();
         let meas = MEASUREMENTS.lock().await.clone();
         let target_temp = CONTROL_SETTINGS.lock().await.target_temp_c;
@@ -325,6 +339,10 @@ async fn cooldown_screen(
     display_line(lcd, 1, "Enter to exit").await;
 
     loop {
+        if let Some(next) = interrupt_for_fault(lcd, Screen::Cooldown).await {
+            return next;
+        }
+
         if enter.is_low() || up.is_low() || down.is_low() {
             wait_for_release(enter).await;
             wait_for_release(up).await;
@@ -337,7 +355,7 @@ async fn cooldown_screen(
     }
 }
 
-async fn fault_screen(lcd: &mut Lcd<'static>) -> Screen {
+async fn fault_screen(lcd: &mut Lcd<'static>, resume: Screen) -> Screen {
     let mut last_code = FaultCode::None;
     let mut last_header = String::<16>::new();
     let mut last_detail = String::<16>::new();
@@ -348,7 +366,7 @@ async fn fault_screen(lcd: &mut Lcd<'static>) -> Screen {
             lcd.clear().await;
             display_line(lcd, 0, "Fault cleared").await;
             Timer::after(Duration::from_millis(400)).await;
-            return Screen::ModeSelect;
+            return resume;
         }
 
         let meas = MEASUREMENTS.lock().await.clone();
@@ -373,6 +391,17 @@ async fn fault_screen(lcd: &mut Lcd<'static>) -> Screen {
         }
 
         Timer::after(Duration::from_millis(200)).await;
+    }
+}
+
+async fn interrupt_for_fault(
+    lcd: &mut Lcd<'static>,
+    resume: Screen,
+) -> Option<Screen> {
+    if current_fault().await == FaultCode::None {
+        None
+    } else {
+        Some(fault_screen(lcd, resume).await)
     }
 }
 
@@ -460,32 +489,35 @@ enum ButtonPressed {
     Enter,
 }
 
+enum WaitOutcome {
+    Button(ButtonPressed),
+    Fault,
+}
+
 async fn wait_for_press(
     up: &mut Input<'static>,
     down: &mut Input<'static>,
     enter: &mut Input<'static>,
-) -> ButtonPressed {
-    let pressed = {
-        let mut up_wait = pin!(up.wait_for_falling_edge());
-        let mut down_wait = pin!(down.wait_for_falling_edge());
-        let mut enter_wait = pin!(enter.wait_for_falling_edge());
+) -> WaitOutcome {
+    loop {
+        if current_fault().await != FaultCode::None {
+            return WaitOutcome::Fault;
+        }
 
-        select3(up_wait.as_mut(), down_wait.as_mut(), enter_wait.as_mut()).await
-    };
-
-    match pressed {
-        Either3::First(_) => {
+        if up.is_low() {
             debounce_and_release(up).await;
-            ButtonPressed::Up
+            return WaitOutcome::Button(ButtonPressed::Up);
         }
-        Either3::Second(_) => {
+        if down.is_low() {
             debounce_and_release(down).await;
-            ButtonPressed::Down
+            return WaitOutcome::Button(ButtonPressed::Down);
         }
-        Either3::Third(_) => {
+        if enter.is_low() {
             debounce_and_release(enter).await;
-            ButtonPressed::Enter
+            return WaitOutcome::Button(ButtonPressed::Enter);
         }
+
+        Timer::after(Duration::from_millis(10)).await;
     }
 }
 
