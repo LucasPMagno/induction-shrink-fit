@@ -1,0 +1,94 @@
+11.392725 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+11.454924 INFO  Vdc: 22.44973 V, Irms: 4.0570793 A, P: 0.050260603 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+11.456369 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+11.463687 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+11.524562 INFO  Vdc: 22.501066 V, Irms: 4.2381988 A, P: 0.053363796 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+11.531927 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+11.557264 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+11.594061 INFO  Vdc: 22.51786 V, Irms: 4.3003697 A, P: 0.05465678 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+11.601857 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+11.663435 INFO  Vdc: 22.55882 V, Irms: 4.3842854 A, P: 0.0562743 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+11.664880 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+11.671849 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.242981 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+11.732822 INFO  Vdc: 22.472242 V, Irms: 4.123328 A, P: 0.05121352 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+11.740568 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+11.765784 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+11.802163 INFO  Vdc: 22.43894 V, Irms: 4.21346 A, P: 0.053096972 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+11.809339 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+11.825483 INFO  SiC module temp: duty 0.6286999 resistance 4045.3223 temp 30.531677 C
+└─ induction_shrink_fit::sensors::__sic_temp_task_task::{async_fn#0} @ src/sensors.rs:236 
+11.871742 INFO  Vdc: 22.484467 V, Irms: 4.244489 A, P: 0.05339846 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+11.873490 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+11.880836 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+11.941634 INFO  Vdc: 22.431658 V, Irms: 4.1541758 A, P: 0.051114377 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+11.949043 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+11.974390 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+12.011057 INFO  Vdc: 22.474678 V, Irms: 4.196731 A, P: 0.052181132 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+12.018830 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+12.080498 INFO  Vdc: 22.476746 V, Irms: 4.1930676 A, P: 0.05257389 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+12.082188 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+12.089174 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+12.149838 INFO  Vdc: 22.49341 V, Irms: 4.1718903 A, P: 0.05166303 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+12.157771 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+12.183092 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+12.219193 INFO  Vdc: 22.499516 V, Irms: 4.290098 A, P: 0.054944325 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+12.226384 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+12.228136 INFO  Safety watch: fault=Coil temperature sensor fault coil=0.0C disc module=30.517315C pcb=29.360985C power=0.05309644kW current=4.2236676A
+└─ induction_shrink_fit::safety::__safety_task_task::{async_fn#0} @ src/safety.rs:72  
+12.288718 INFO  Vdc: 22.519989 V, Irms: 4.431868 A, P: 0.056081224 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+12.290393 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+12.297726 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+12.330259 INFO  SiC module temp: duty 0.6283247 resistance 4054.5645 temp 30.471008 C
+└─ induction_shrink_fit::sensors::__sic_temp_task_task::{async_fn#0} @ src/sensors.rs:236 
+12.358812 INFO  Vdc: 22.51801 V, Irms: 4.341679 A, P: 0.056230813 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+12.366023 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+12.391389 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+12.428261 INFO  Vdc: 22.469961 V, Irms: 4.1304736 A, P: 0.051387854 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+12.436062 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 
+12.497569 INFO  Vdc: 22.552135 V, Irms: 4.2677617 A, P: 0.054284487 kW
+└─ induction_shrink_fit::sensors::__adc_task_task::{async_fn#0} @ src/sensors.rs:138 
+12.499265 WARN  MLX90614 read error
+└─ induction_shrink_fit::sensors::__mlx_task_task::{async_fn#0} @ src/sensors.rs:199 
+12.506204 INFO  Coil temp: 0.0 C (disconnected), PCB temp: 29.365082 C
+└─ induction_shrink_fit::sensors::__ads_task_task::{async_fn#0} @ src/sensors.rs:169 

@@ -29,13 +29,31 @@ pub async fn safety_task(
         let report = evaluate_fault(interlock, gate_fault, gate_ready).await;
         let code = report.code;
 
-        let mut fault = FAULT_STATE.lock().await;
-        if fault.code != code {
-            if code == FaultCode::None {
-                if fault.code != FaultCode::None {
-                    info!(
-                        "Fault cleared: {} (coil={}C{} module={}C pcb={}C power={}kW)",
-                        fault.code.message(),
+        {
+            let mut fault = FAULT_STATE.lock().await;
+            if fault.code != code {
+                if code == FaultCode::None {
+                    if fault.code != FaultCode::None {
+                        info!(
+                            "Fault cleared: {} (coil={}C{} module={}C pcb={}C power={}kW)",
+                            fault.code.message(),
+                            report.snapshot.coil_temp_c,
+                            if report.snapshot.coil_temp_disconnected {
+                                " disc"
+                            } else {
+                                ""
+                            },
+                            report.snapshot.module_temp_c,
+                            report.snapshot.pcb_temp_c,
+                            report.snapshot.coil_power_kw,
+                        );
+                    } else {
+                        info!("Fault state reset");
+                    }
+                } else {
+                    warn!(
+                        "Fault detected: {} (coil={}C{} module={}C pcb={}C power={}kW current={}A)",
+                        code.message(),
                         report.snapshot.coil_temp_c,
                         if report.snapshot.coil_temp_disconnected {
                             " disc"
@@ -45,27 +63,11 @@ pub async fn safety_task(
                         report.snapshot.module_temp_c,
                         report.snapshot.pcb_temp_c,
                         report.snapshot.coil_power_kw,
+                        report.snapshot.coil_current_rms_a,
                     );
-                } else {
-                    info!("Fault state reset");
                 }
-            } else {
-                warn!(
-                    "Fault detected: {} (coil={}C{} module={}C pcb={}C power={}kW current={}A)",
-                    code.message(),
-                    report.snapshot.coil_temp_c,
-                    if report.snapshot.coil_temp_disconnected {
-                        " disc"
-                    } else {
-                        ""
-                    },
-                    report.snapshot.module_temp_c,
-                    report.snapshot.pcb_temp_c,
-                    report.snapshot.coil_power_kw,
-                    report.snapshot.coil_current_rms_a,
-                );
+                fault.code = code;
             }
-            fault.code = code;
         }
 
         if Instant::now() >= next_watchdog_log && should_log_watchdog(&report.snapshot, code) {
